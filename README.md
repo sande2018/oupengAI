@@ -2,6 +2,30 @@
 
 一个用 **Python + Flask + SQLite** 写成的 AI 网关：把多个上游 OpenAI 兼容服务（官方、中转、自建）登记为「渠道」，每个渠道可放多组 API Key、多个模型；模型上勾选能力类型，再用一个自定义模型名把它们组成调度组对外提供。客户端只认一个模型名，后台自动完成选型、故障切换、Key 轮换与知识库检索。
 
+<img width="1896" height="889" alt="image" src="https://github.com/user-attachments/assets/043bbaf7-0d7b-4a66-b122-1ff317a7098f" />
+
+<img width="1920" height="891" alt="image" src="https://github.com/user-attachments/assets/34828984-5f1f-40ca-acfc-689c8db3f711" />
+
+<img width="1879" height="887" alt="image" src="https://github.com/user-attachments/assets/d7ff30ed-5975-4ee4-a9d2-552dd663ad8b" />
+
+<img width="1918" height="885" alt="image" src="https://github.com/user-attachments/assets/57bd23f4-e474-4c9c-941b-815d32d910e5" />
+
+<img width="1911" height="889" alt="image" src="https://github.com/user-attachments/assets/0804c227-fa08-47b9-acea-5c9857799b68" />
+
+<img width="1920" height="887" alt="image" src="https://github.com/user-attachments/assets/47fdee94-96c9-4810-af22-9161da3672af" />
+
+<img width="1920" height="885" alt="image" src="https://github.com/user-attachments/assets/9984ac18-778c-4068-876f-2894de05004e" />
+
+<img width="1884" height="888" alt="image" src="https://github.com/user-attachments/assets/3bf8a95d-ea17-4fea-865f-65a9346f8a5c" />
+
+
+
+
+
+
+
+
+
 ---
 
 ## 1. 功能一览
