@@ -406,7 +406,7 @@ def _execute_combos(combos, endpoint, payload, timeout=None, stream=False,
         for attempt in range(tries):
             try:
                 resp = _http().post(url, headers=headers,
-                                    data=json.dumps(body, ensure_ascii=False),
+                                    data=json.dumps(body, ensure_ascii=False).encode('utf-8'),
                                     timeout=req_timeout, stream=stream)
             except requests.exceptions.RequestException as e:
                 msg = '%s' % e
