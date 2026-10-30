@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ page_title }} · 欧朋AI</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css', v='7') }}">
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="logo">欧</div>
+      <div><b>欧朋AI</b><small>多模型智能调度网关</small></div>
+    </div>
+    <nav>
+      {% for key, label in [('dashboard', '概览'), ('channels', '渠道与 Key'),
+                            ('models', '智能调度'), ('knowledge', '知识库'),
+                            ('apikeys', 'API Key'), ('playground', '在线测试'),
+                            ('logs', '调用日志'), ('settings', '系统设置')] %}
+      <a href="/db_admin/{{ key }}" class="{{ 'active' if active == key else '' }}">
+        <span class="dot"></span>{{ label }}
+      </a>
+      {% endfor %}
+    </nav>
+    <div class="side-foot">
+      <div class="api-hint"><b>API 基础地址</b>{{ request.host_url }}v1</div>
+      <button class="btn btn-sm" onclick="logout()" type="button">退出登录</button>
+    </div>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div>
+        <h1>{% block heading %}{{ page_title }}{% endblock %}</h1>
+        {% block subheading %}{% endblock %}
+      </div>
+      <div class="top-actions">{% block actions %}{% endblock %}</div>
+    </div>
+    {% block content %}{% endblock %}
+  </main>
+</div>
+<script src="{{ url_for('static', filename='js/app.js', v='7') }}"></script>
+{% block scripts %}{% endblock %}
+</body>
+</html>

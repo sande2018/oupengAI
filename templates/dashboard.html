@@ -1,0 +1,115 @@
+{% extends 'base.html' %}
+{% block subheading %}<div class="sub">一个模型名，自动选择渠道、模型与 Key；需要时自动检索知识库</div>{% endblock %}
+{% block actions %}
+  <a class="btn" href="/db_admin/channels">配置渠道</a>
+  <a class="btn btn-primary" href="/db_admin/models">配置调度</a>
+{% endblock %}
+{% block content %}
+<div class="grid cols-4" id="stat-grid">
+  <div class="card stat"><div class="label">加载中…</div><div class="value">-</div></div>
+</div>
+
+<div class="grid cols-2">
+  <div class="card">
+    <div class="card-header"><h2>能力覆盖</h2><a href="/db_admin/channels">去配置</a></div>
+    <div id="type-list" class="muted">加载中…</div>
+  </div>
+  <div class="card">
+    <div class="card-header"><h2>最近 24 小时</h2></div>
+    <div id="last24" class="grid cols-2 muted">加载中…</div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-header"><h2>最近调用</h2><a href="/db_admin/logs">查看全部</a></div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr>
+        <th>时间</th><th>接口</th><th>请求模型</th><th>类型</th>
+        <th>渠道 / 上游模型</th><th>知识库</th><th>状态</th><th>耗时</th>
+      </tr></thead>
+      <tbody id="recent-body"><tr><td colspan="8" class="empty">加载中…</td></tr></tbody>
+    </table>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-header"><h2>快速接入</h2>
+    <a href="/db_admin/apikeys">生成 API Key</a>
+  </div>
+  <p class="muted">兼容 OpenAI SDK：把 <span class="kbd">base_url</span> 指向本服务，模型名填你创建的自定义模型名。</p>
+  <pre id="curl-example" class="mt8"></pre>
+  <p class="muted mt8">Python SDK：</p>
+  <pre>from openai import OpenAI
+client = OpenAI(base_url="{{ request.host_url }}v1", api_key="sk-ou-你的Key")
+resp = client.chat.completions.create(model="oupeng", messages=[{"role": "user", "content": "你好"}])
+print(resp.choices[0].message.content)</pre>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  const TYPE_DESC = {
+    text: '纯文本对话', vision: '看懂图片内容', ocr: 'OCR 识别文字',
+    gen: '文生图', video_gen: '文生视频', video_vision: '看懂视频内容'
+  };
+
+  async function load() {
+    const d = await api('/db_admin/api/overview');
+    const c = d.counts, h = d.last24h;
+
+    document.getElementById('stat-grid').innerHTML = [
+      statCard('启用渠道', c.channels_on + ' / ' + c.channels, '共 ' + c.channels + ' 个渠道'),
+      statCard('渠道模型', c.models_on + ' / ' + c.models, '对外模型 ' + c.custom_models + ' 个'),
+      statCard('知识库', c.kbs + ' 个', c.docs + ' 篇文档 · ' + fmtNum(c.chunks) + ' 个切片'),
+      statCard('24 小时调用', fmtNum(h.calls), '成功率 ' + h.success_rate + '% · 平均 ' + h.avg_latency_ms + 'ms'),
+    ].join('');
+
+    document.getElementById('type-list').innerHTML = d.types.map(function (t) {
+      return '<div class="row between" style="padding:6px 0;border-bottom:1px solid var(--line)">' +
+        '<div><b>' + esc(t.label) + '</b> <span class="muted">· ' + esc(TYPE_DESC[t.key] || '') + '</span></div>' +
+        (t.available ? '<span class="badge ok">可用</span>' : '<span class="badge gray">未配置</span>') +
+        '</div>';
+    }).join('');
+
+    document.getElementById('last24').innerHTML = [
+      statCard('调用次数', fmtNum(h.calls), ''),
+      statCard('失败次数', fmtNum(h.failed), h.failed ? '请查看日志' : '无失败'),
+      statCard('输入 Tokens', fmtNum(h.prompt_tokens), ''),
+      statCard('输出 Tokens', fmtNum(h.completion_tokens), ''),
+    ].join('');
+
+    const body = document.getElementById('recent-body');
+    if (!d.recent.length) {
+      body.innerHTML = '<tr><td colspan="8" class="empty">还没有调用记录</td></tr>';
+    } else {
+      body.innerHTML = d.recent.map(function (r) {
+        return '<tr>' +
+          '<td class="sub">' + fmtTime(r.created_at) + '</td>' +
+          '<td>' + esc(r.endpoint) + '</td>' +
+          '<td>' + esc(r.request_model) + '</td>' +
+          '<td><span class="badge primary">' + esc(typeLabel(r.resolved_type)) + '</span></td>' +
+          '<td>' + esc(r.channel_name || '-') + '<div class="sub">' + esc(r.upstream_model || '') + '</div></td>' +
+          '<td>' + (r.rag_hits ? '<span class="badge ok">' + r.rag_hits + ' 条</span>' : '-') + '</td>' +
+          '<td>' + (r.ok ? '<span class="badge ok">成功</span>' : '<span class="badge danger">失败 ' + esc(r.status_code) + '</span>') + '</td>' +
+          '<td class="sub">' + r.latency_ms + 'ms</td>' +
+          '</tr>';
+      }).join('');
+    }
+
+    const curl = 'curl ' + location.origin + '/v1/chat/completions \\\n' +
+      '  -H "Authorization: Bearer sk-ou-你的Key" \\\n' +
+      '  -H "Content-Type: application/json" \\\n' +
+      '  -d \'{"model":"oupeng","messages":[{"role":"user","content":"你好"}]}\'';
+    document.getElementById('curl-example').textContent = curl;
+  }
+
+  function statCard(label, value, hint) {
+    return '<div class="card stat"><div class="label">' + esc(label) + '</div>' +
+      '<div class="value">' + esc(value) + '</div>' +
+      '<div class="hint">' + esc(hint) + '</div></div>';
+  }
+
+  load().catch(function (e) { toast(e.message, 'error'); });
+</script>
+{% endblock %}

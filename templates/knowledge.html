@@ -1,0 +1,351 @@
+{% extends 'base.html' %}
+{% block subheading %}<div class="sub">API Key 绑定知识库后，该 Key 发起的对话会自动检索并注入资料</div>{% endblock %}
+{% block actions %}
+  <button class="btn btn-primary" onclick="editKb(null)">+ 新建知识库</button>
+{% endblock %}
+{% block content %}
+<div class="notice">
+  向量化完全在本机完成（中文单字 + 二元组哈希，512 维），不依赖任何 embedding 接口，也不需要联网。
+  切片大小与重叠可在知识库里单独调整，修改后会自动重建索引。
+</div>
+<div class="grid" style="grid-template-columns: 320px minmax(0, 1fr)">
+  <div class="card">
+    <div class="card-header"><h2>知识库</h2></div>
+    <div id="kb-list" class="muted">加载中…</div>
+  </div>
+  <div class="card" id="kb-detail">
+    <div class="empty">选择左侧知识库进行管理</div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  let KBS = [];
+  let CURRENT_ID = 0;
+
+  async function load() {
+    const r = await api('/db_admin/api/kbs');
+    KBS = r.data;
+    renderList();
+    if (CURRENT_ID && KBS.some(function (k) { return k.id === CURRENT_ID; })) {
+      renderDetail(KBS.find(function (k) { return k.id === CURRENT_ID; }));
+    }
+  }
+
+  function renderList() {
+    const box = document.getElementById('kb-list');
+    if (!KBS.length) {
+      box.innerHTML = '<div class="empty">还没有知识库</div>';
+      return;
+    }
+    box.innerHTML = KBS.map(function (kb) {
+      return '<div class="kb-item ' + (kb.id === CURRENT_ID ? 'on' : '') + '" onclick="renderDetailById(' + kb.id + ')">' +
+        '<div class="row between"><b>' + esc(kb.name) + '</b>' +
+        (kb.enabled ? '' : '<span class="badge gray">停用</span>') + '</div>' +
+        '<div class="sub">' + kb.doc_count + ' 篇文档 · ' + fmtNum(kb.chunk_count) + ' 个切片</div>' +
+        '</div>';
+    }).join('');
+  }
+
+  function renderDetailById(id) {
+    const kb = KBS.find(function (k) { return k.id === id; });
+    if (!kb) return;
+    CURRENT_ID = id;
+    renderList();
+    renderDetail(kb);
+  }
+
+  function renderDetail(kb) {
+    document.getElementById('kb-detail').innerHTML =
+      '<div class="card-header"><div><h2>' + esc(kb.name) + '</h2>' +
+        '<div class="sub">' + esc(kb.description || '未填写说明') + '</div></div>' +
+        '<div class="row">' +
+          '<button class="btn btn-sm" onclick="editKb(' + kb.id + ')">参数</button>' +
+          '<button class="btn btn-sm" onclick="reindex(' + kb.id + ')">重建索引</button>' +
+          '<button class="btn btn-sm btn-danger" onclick="delKb(' + kb.id + ')">删除</button>' +
+        '</div></div>' +
+      '<div class="grid cols-4 mt8">' +
+        stat('切片大小', kb.chunk_size + ' 字', '重叠 ' + kb.chunk_overlap) +
+        stat('召回条数', kb.top_k + ' 条', '相似度 ≥ ' + kb.min_score) +
+        stat('文档', kb.doc_count + ' 篇', '') +
+        stat('切片', fmtNum(kb.chunk_count), '') +
+      '</div>' +
+      '<hr style="border:none;border-top:1px solid var(--line);margin:16px 0">' +
+      '<h3 class="mb8" style="font-size:14px">添加文档</h3>' +
+      '<div class="form-grid">' +
+        '<div class="field"><label>上传文件</label><input type="file" id="kb-file"></div>' +
+        '<div class="field"><label>标题（可选）</label><input type="text" id="kb-title" placeholder="默认用文件名"></div>' +
+        '<div class="field full"><label>或直接粘贴文本</label>' +
+          '<textarea id="kb-text" placeholder="把制度、FAQ、产品资料、客服话术粘贴进来…"></textarea></div>' +
+      '</div>' +
+      '<div class="row end mt8"><button class="btn btn-primary" onclick="uploadDoc(' + kb.id + ')">保存并建立索引</button></div>' +
+      '<h3 class="mt16 mb8" style="font-size:14px">文档列表</h3>' +
+      '<div id="doc-list"><div class="empty">加载中…</div></div>' +
+      '<h3 class="mt16 mb8" style="font-size:14px">检索测试</h3>' +
+      '<div class="row"><input type="text" id="kb-query" placeholder="输入一句话，看看能召回哪些片段" style="flex:1">' +
+        '<button class="btn" onclick="searchKb(' + kb.id + ')">检索</button></div>' +
+      '<div id="kb-hits" class="mt8"></div>';
+    loadDocuments(kb.id);
+  }
+
+  function stat(label, value, hint) {
+    return '<div class="stat"><div class="label">' + esc(label) + '</div>' +
+      '<div class="value" style="font-size:18px">' + esc(value) + '</div>' +
+      '<div class="hint">' + esc(hint) + '</div></div>';
+  }
+
+  async function loadDocuments(kbId) {
+    const box = document.getElementById('doc-list');
+    if (!box) return;
+    try {
+      const r = await api('/db_admin/api/kbs/' + kbId + '/documents');
+      if (!r.data.length) {
+        box.innerHTML = '<div class="empty">还没有文档，上传文件或粘贴文本吧</div>';
+        return;
+      }
+      box.innerHTML = '<div class="table-wrap"><table><thead><tr>' +
+        '<th>标题</th><th>来源</th><th>字数</th><th>切片</th><th>时间</th><th>操作</th>' +
+        '</tr></thead><tbody>' + r.data.map(function (d) {
+          return '<tr><td><b>' + esc(d.title) + '</b><div class="sub">' + esc(d.preview || '') + '</div></td>' +
+            '<td class="sub">' + esc(d.source || '-') + '</td>' +
+            '<td class="sub">' + d.char_count + '</td>' +
+            '<td class="sub">' + d.chunk_count + '</td>' +
+            '<td class="sub">' + fmtTime(d.created_at) + '</td>' +
+            '<td class="actions">' +
+            '<button class="btn btn-sm" onclick="editDoc(' + d.id + ',' + kbId + ')">编辑</button> ' +
+            '<button class="btn btn-sm" onclick="viewDoc(' + d.id + ')">查看</button> ' +
+            '<button class="btn btn-sm btn-danger" onclick="delDoc(' + d.id + ',' + kbId + ')">删除</button></td></tr>';
+        }).join('') + '</tbody></table></div>';
+    } catch (e) {
+      box.innerHTML = '<div class="notice warn">' + esc(e.message) + '</div>';
+    }
+  }
+
+  function editKb(id) {
+    const kb = id ? KBS.find(function (k) { return k.id === id; })
+      : { name: '', description: '', chunk_size: 500, chunk_overlap: 80,
+          top_k: 4, min_score: 0.12, enabled: 1 };
+    openModal(id ? '知识库参数' : '新建知识库',
+      '<div class="form-grid">' +
+      '<div class="field full"><label>名称</label><input id="k-name" type="text" value="' + esc(kb.name) + '"></div>' +
+      '<div class="field full"><label>说明</label><input id="k-desc" type="text" value="' + esc(kb.description || '') + '"></div>' +
+      '<div class="field"><label>切片大小（字）</label><input id="k-size" type="number" min="80" value="' + kb.chunk_size + '"></div>' +
+      '<div class="field"><label>切片重叠（字）</label><input id="k-overlap" type="number" min="0" value="' + kb.chunk_overlap + '"></div>' +
+      '<div class="field"><label>召回条数</label><input id="k-topk" type="number" min="1" max="20" value="' + kb.top_k + '"></div>' +
+      '<div class="field"><label>最低相似度</label><input id="k-score" type="number" step="0.01" min="0" max="1" value="' + kb.min_score + '"></div>' +
+      '<div class="field"><label>状态</label><label class="check"><input id="k-enabled" type="checkbox" ' + (kb.enabled === 0 ? '' : 'checked') + '>启用</label></div>' +
+      '</div>', async function (mask) {
+        const payload = {
+          name: mask.querySelector('#k-name').value.trim(),
+          description: mask.querySelector('#k-desc').value.trim(),
+          chunk_size: Number(mask.querySelector('#k-size').value || 500),
+          chunk_overlap: Number(mask.querySelector('#k-overlap').value || 80),
+          top_k: Number(mask.querySelector('#k-topk').value || 4),
+          min_score: Number(mask.querySelector('#k-score').value || 0.12),
+          enabled: mask.querySelector('#k-enabled').checked ? 1 : 0
+        };
+        if (!payload.name) throw new Error('请填写名称');
+        const r = await api(id ? '/db_admin/api/kbs/' + id : '/db_admin/api/kbs', {
+          method: id ? 'PUT' : 'POST', body: payload
+        });
+        if (!id && r.id) CURRENT_ID = r.id;
+        if (id) CURRENT_ID = id;
+        toast('已保存', 'ok');
+        await load();
+        if (CURRENT_ID) renderDetailById(CURRENT_ID);
+      }, { wide: true });
+  }
+
+  async function delKb(id) {
+    const kb = KBS.find(function (k) { return k.id === id; });
+    if (!confirm('删除知识库「' + kb.name + '」及其所有文档、切片？此操作不可恢复。')) return;
+    try {
+      await api('/db_admin/api/kbs/' + id, { method: 'DELETE' });
+      if (CURRENT_ID === id) {
+        CURRENT_ID = 0;
+        document.getElementById('kb-detail').innerHTML = '<div class="empty">选择左侧知识库进行管理</div>';
+      }
+      toast('已删除', 'ok');
+      await load();
+    } catch (e) { toast(e.message, 'error'); }
+  }
+
+  async function reindex(id) {
+    toast('正在重建索引…');
+    try {
+      const r = await api('/db_admin/api/kbs/' + id + '/reindex', { method: 'POST' });
+      toast('重建完成：' + r.docs + ' 篇文档 / ' + r.chunks + ' 个切片', 'ok');
+      await load();
+    } catch (e) { toast(e.message, 'error'); }
+  }
+
+  async function uploadDoc(kbId) {
+    const fileInput = document.getElementById('kb-file');
+    const title = document.getElementById('kb-title').value.trim();
+    const text = document.getElementById('kb-text').value;
+    try {
+      let r;
+      if (fileInput.files && fileInput.files.length) {
+        const fd = new FormData();
+        fd.append('file', fileInput.files[0]);
+        if (title) fd.append('title', title);
+        r = await api('/db_admin/api/kbs/' + kbId + '/documents', { method: 'POST', body: fd });
+      } else if (text.trim()) {
+        r = await api('/db_admin/api/kbs/' + kbId + '/documents', {
+          method: 'POST',
+          body: { title: title, content: text }
+        });
+      } else {
+        toast('请选择文件或粘贴文本', 'error');
+        return;
+      }
+      toast('已入库：' + r.chunks + ' 个切片', 'ok');
+      await load();
+      renderDetailById(kbId);
+    } catch (e) { toast(e.message, 'error'); }
+  }
+
+  async function editDoc(id, kbId) {
+    try {
+      const [r, cm, m] = await Promise.all([
+        api('/db_admin/api/documents/' + id),
+        api('/db_admin/api/custom-models'),
+        api('/db_admin/api/models')
+      ]);
+      const d = r.data;
+      const models = [];
+      cm.data.filter(function (x) { return x.enabled; }).forEach(function (x) {
+        models.push({ name: x.name, label: x.name + '（对外模型）' });
+      });
+      m.data.forEach(function (x) {
+        if (!x.enabled) return;
+        if (!models.some(function (y) { return y.name === x.model_name; })) {
+          models.push({ name: x.model_name, label: x.model_name + '（' + x.channel_name + '）' });
+        }
+      });
+      const options = '<option value="">自动（使用文本模型）</option>' +
+        models.map(function (x) {
+          return '<option value="' + esc(x.name) + '">' + esc(x.label) + '</option>';
+        }).join('');
+      openModal('编辑文档',
+        '<div class="notice" style="margin-bottom:12px">' +
+          '「AI 润色」会用所选模型把正文整理成更适合检索的格式：按主题分段、每段自包含、' +
+          '去口语与重复，保留事实与数字。润色只填回编辑框，确认后再点保存。</div>' +
+        '<div class="row mb12">' +
+          '<span class="muted">润色模型</span>' +
+          '<select id="doc-polish-model" style="flex:1;max-width:320px">' + options + '</select>' +
+          '<button type="button" class="btn btn-sm" onclick="polishDoc(this)">AI 润色</button>' +
+          '<span class="sub" id="doc-polish-msg"></span>' +
+        '</div>' +
+        '<div class="form-grid">' +
+        '<div class="field full"><label>标题</label>' +
+          '<input id="doc-title" type="text" value="' + esc(d.title) + '"></div>' +
+        '<div class="field full"><label>内容（单次润色最多 60000 字，超过 6000 字自动分批）</label>' +
+          '<textarea id="doc-content" style="min-height:320px">' + esc(d.content) + '</textarea>' +
+          '<div class="tip">保存后会按知识库当前的切片参数重新建立该文档的索引。</div>' +
+        '</div></div>',
+        async function (root) {
+          const content = root.querySelector('#doc-content').value;
+          if (!content.trim()) throw new Error('内容不能为空');
+          const res = await api('/db_admin/api/documents/' + id, {
+            method: 'PUT',
+            body: {
+              title: root.querySelector('#doc-title').value.trim(),
+              content: content
+            }
+          });
+          toast('已保存，重新索引 ' + res.chunks + ' 个切片', 'ok');
+          CURRENT_ID = kbId;
+          await load();
+        }, { wide: true });
+    } catch (e) { toast(e.message, 'error'); }
+  }
+
+  async function polishDoc(btn) {
+    const root = btn.closest('.modal-mask');
+    if (!root) return;
+    const contentEl = root.querySelector('#doc-content');
+    const content = contentEl.value.trim();
+    const msg = root.querySelector('#doc-polish-msg');
+    if (!content) { toast('内容为空，无法润色', 'error'); return; }
+    if (content.length > 60000) {
+      toast('内容超过 60000 字，请先拆分', 'error');
+      return;
+    }
+    if (!confirm('AI 润色会重写当前编辑框内容（不会自动保存）。' +
+        (content.length > 6000 ? '\n文档较长，会分多批调用模型，可能需要几分钟。' : '') +
+        '继续？')) return;
+    const oldText = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = '润色中…';
+    if (msg) { msg.textContent = ''; msg.className = 'sub'; }
+    try {
+      const r = await api('/db_admin/api/ai/polish-document', {
+        method: 'POST',
+        body: {
+          model: root.querySelector('#doc-polish-model').value,
+          title: root.querySelector('#doc-title').value.trim(),
+          content: content
+        }
+      });
+      contentEl.value = r.content;
+      if (msg) {
+        msg.textContent = '已润色' + (r.batches > 1 ? '（分 ' + r.batches + ' 批）' : '') +
+          '（' + r.channel + ' / ' + r.model + ' · ' +
+          r.elapsed_ms + 'ms），请检查后保存';
+        msg.className = 'sub ok-text';
+      }
+      toast('润色完成，请检查后保存', 'ok');
+    } catch (e) {
+      if (msg) { msg.textContent = e.message; msg.className = 'sub danger-text'; }
+      toast(e.message, 'error');
+    } finally {
+      btn.disabled = false;
+      btn.textContent = oldText;
+    }
+  }
+
+  async function viewDoc(id) {
+    try {
+      const r = await api('/db_admin/api/documents/' + id);
+      openModal(r.data.title, '<pre style="max-height:60vh">' + esc(r.data.content) + '</pre>', null, { wide: true });
+    } catch (e) { toast(e.message, 'error'); }
+  }
+
+  async function delDoc(id, kbId) {
+    if (!confirm('删除这篇文档及其切片？')) return;
+    try {
+      await api('/db_admin/api/documents/' + id, { method: 'DELETE' });
+      toast('已删除', 'ok');
+      await load();
+      renderDetailById(kbId);
+    } catch (e) { toast(e.message, 'error'); }
+  }
+
+  async function searchKb(id) {
+    const query = document.getElementById('kb-query').value.trim();
+    const box = document.getElementById('kb-hits');
+    if (!query) { toast('请输入检索内容', 'error'); return; }
+    box.innerHTML = '<span class="spinner"></span> 检索中…';
+    try {
+      const r = await api('/db_admin/api/kbs/' + id + '/search', { method: 'POST', body: { query: query } });
+      if (!r.data.length) {
+        box.innerHTML = '<div class="empty">没有命中，试试换个说法或降低最低相似度</div>';
+        return;
+      }
+      box.innerHTML = '<div class="sub mb8">耗时 ' + r.elapsed_ms + 'ms，命中 ' + r.data.length + ' 条</div>' +
+        r.data.map(function (h, i) {
+          return '<div class="card" style="box-shadow:none;padding:12px">' +
+            '<div class="row between"><b>[' + (i + 1) + '] ' + esc(h.title) + '</b>' +
+            '<span class="badge ok">相似度 ' + h.score + '</span></div>' +
+            '<div class="mt8" style="font-size:12.5px;white-space:pre-wrap">' + esc(h.content) + '</div></div>';
+        }).join('');
+    } catch (e) {
+      box.innerHTML = '<div class="notice warn">' + esc(e.message) + '</div>';
+    }
+  }
+
+  load().catch(function (e) { toast(e.message, 'error'); });
+</script>
+{% endblock %}

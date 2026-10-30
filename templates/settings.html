@@ -1,0 +1,111 @@
+{% extends 'base.html' %}
+{% block subheading %}<div class="sub">知识库检索参数与管理员密码</div>{% endblock %}
+{% block content %}
+<div class="grid cols-2">
+  <div class="card">
+    <div class="card-header"><h2>知识库（RAG）</h2></div>
+    <div class="form-grid">
+      <div class="field"><label>默认召回条数</label><input type="number" id="s-topk" min="1" max="20"></div>
+      <div class="field"><label>最低相似度</label><input type="number" id="s-score" step="0.01" min="0" max="1"></div>
+      <div class="field"><label>注入资料最大字数</label><input type="number" id="s-chars" min="200" max="12000"></div>
+      <div class="field"><label>开关</label><label class="check"><input type="checkbox" id="s-enabled">启用知识库检索</label></div>
+    </div>
+    <div class="row end mt12"><button class="btn btn-primary" onclick="saveSettings()">保存设置</button></div>
+    <div class="notice mt12" style="margin-bottom:0">
+      向量维度 <span class="kbd" id="s-dim">512</span>，本地哈希生成，修改切片参数后到知识库点「重建索引」即可。
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header"><h2>管理员密码</h2></div>
+    <div id="pwd-warn" class="notice warn" style="display:none">
+      当前仍是默认密码 <span class="kbd">admin888</span>，建议立即修改。
+    </div>
+    <div class="form-grid">
+      <div class="field full"><label>原密码</label><input type="password" id="s-old" autocomplete="current-password"></div>
+      <div class="field full"><label>新密码（至少 6 位）</label><input type="password" id="s-new" autocomplete="new-password"></div>
+      <div class="field full"><label>确认新密码</label><input type="password" id="s-new2" autocomplete="new-password"></div>
+    </div>
+    <div class="row end mt12"><button class="btn btn-primary" onclick="changePassword()">修改密码</button></div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-header"><h2>接口一览</h2></div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>方法</th><th>路径</th><th>说明</th><th>自动调度类型</th></tr></thead>
+      <tbody>
+        <tr><td><span class="badge">POST</span></td><td class="mono">/v1/chat/completions</td>
+          <td>OpenAI 兼容对话；带图片自动找视觉/OCR 模型，带视频自动找视频模型</td>
+          <td>text / vision / ocr / video_vision</td></tr>
+        <tr><td><span class="badge">POST</span></td><td class="mono">/v1/images/generations</td>
+          <td>文生图</td><td>gen</td></tr>
+        <tr><td><span class="badge">POST</span></td><td class="mono">/v1/videos/generations</td>
+          <td>生视频（端点可在渠道里改）</td><td>video_gen</td></tr>
+        <tr><td><span class="badge">POST</span></td><td class="mono">/v1/embeddings</td>
+          <td>本地哈希向量，返回 OpenAI 格式</td><td>本地计算</td></tr>
+        <tr><td><span class="badge">GET</span></td><td class="mono">/v1/models</td>
+          <td>列出对外模型与上游真实模型</td><td>-</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="muted mt12">
+    鉴权：<span class="kbd">Authorization: Bearer sk-ou-...</span>。
+    需要临时关闭知识库：请求头加 <span class="kbd">X-Knowledge: off</span>；
+    指定知识库：<span class="kbd">X-Knowledge-Ids: 1,2</span> 或请求体加
+    <span class="kbd">"knowledge": {"kb_ids": [1,2], "top_k": 5}</span>（该字段不会转发给上游）。
+    强制类型：请求头 <span class="kbd">X-Task-Type: ocr</span>。
+  </p>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  async function load() {
+    const r = await api('/db_admin/api/settings');
+    const d = r.data;
+    document.getElementById('s-topk').value = d.rag_top_k;
+    document.getElementById('s-score').value = d.rag_min_score;
+    document.getElementById('s-chars').value = d.rag_max_chars;
+    document.getElementById('s-enabled').checked = d.rag_enabled === '1';
+    document.getElementById('s-dim').textContent = d.vector_dim;
+    document.getElementById('pwd-warn').style.display = d.password_is_default ? '' : 'none';
+  }
+
+  async function saveSettings() {
+    try {
+      await api('/db_admin/api/settings', {
+        method: 'PUT',
+        body: {
+          rag_top_k: Number(document.getElementById('s-topk').value || 4),
+          rag_min_score: Number(document.getElementById('s-score').value || 0.12),
+          rag_max_chars: Number(document.getElementById('s-chars').value || 3000),
+          rag_enabled: document.getElementById('s-enabled').checked ? 1 : 0
+        }
+      });
+      toast('已保存', 'ok');
+    } catch (e) { toast(e.message, 'error'); }
+  }
+
+  async function changePassword() {
+    const oldPwd = document.getElementById('s-old').value;
+    const newPwd = document.getElementById('s-new').value;
+    const newPwd2 = document.getElementById('s-new2').value;
+    if (!oldPwd || !newPwd) { toast('请填写原密码和新密码', 'error'); return; }
+    if (newPwd !== newPwd2) { toast('两次输入的新密码不一致', 'error'); return; }
+    try {
+      await api('/db_admin/api/password', {
+        method: 'POST', body: { old_password: oldPwd, new_password: newPwd }
+      });
+      toast('密码已修改', 'ok');
+      document.getElementById('s-old').value = '';
+      document.getElementById('s-new').value = '';
+      document.getElementById('s-new2').value = '';
+      load();
+    } catch (e) { toast(e.message, 'error'); }
+  }
+
+  load().catch(function (e) { toast(e.message, 'error'); });
+</script>
+{% endblock %}

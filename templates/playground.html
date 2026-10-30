@@ -1,0 +1,176 @@
+{% extends 'base.html' %}
+{% block subheading %}<div class="sub">用后台登录态直接试跑，不消耗额外 API Key；响应会显示真实命中的渠道</div>{% endblock %}
+{% block content %}
+<div class="grid" style="grid-template-columns: minmax(0, 1fr) 320px">
+  <div class="card">
+    <div class="row mb12">
+      <select id="pg-model" style="width:240px"></select>
+      <select id="pg-type" style="width:170px">
+        <option value="">自动判定类型</option>
+        <option value="text">强制文本</option>
+        <option value="vision">强制图片理解</option>
+        <option value="ocr">强制图片识别</option>
+        <option value="gen">强制生图</option>
+        <option value="video_gen">强制生视频</option>
+        <option value="video_vision">强制视频识别</option>
+      </select>
+    </div>
+    <div id="pg-model-types" class="mb12 muted">未选择模型</div>
+    <div class="field"><label>输入</label>
+      <textarea id="pg-prompt" placeholder="输入你的问题。带图片时可以选择下面的图片，会自动按图片理解调度。"></textarea>
+    </div>
+    <div class="form-grid mt8">
+      <div class="field"><label>图片 URL（可选）</label><input type="text" id="pg-image-url" placeholder="https://... 或留空"></div>
+      <div class="field"><label>或上传图片（可选）</label><input type="file" id="pg-image-file" accept="image/*"></div>
+      <div class="field"><label>最大输出 tokens</label><input type="number" id="pg-max" value="512" min="16" max="4096"></div>
+      <div class="field"><label>温度</label><input type="number" id="pg-temp" value="0.7" step="0.1" min="0" max="2"></div>
+    </div>
+    <div class="row mt12">
+      <button class="btn btn-primary" id="pg-send" onclick="send()">发送</button>
+      <span class="muted" id="pg-status"></span>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header"><h2>知识库</h2></div>
+    <label class="check"><input type="checkbox" id="pg-use-kb" checked>使用知识库增强</label>
+    <div id="pg-kbs" class="mt8"></div>
+    <div class="notice mt12" style="margin-bottom:0">不勾选具体知识库时，会自动使用全部启用中的知识库。</div>
+  </div>
+</div>
+
+<div class="card" id="pg-result" style="display:none">
+  <div class="card-header"><h2>回复</h2><div id="pg-meta" class="sub"></div></div>
+  <pre id="pg-reply" style="white-space:pre-wrap"></pre>
+  <div id="pg-hits" class="mt12"></div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  let MODELS = [];
+  let KBS = [];
+  let IMAGE_DATA = '';
+
+  async function init() {
+    const [cm, m, k] = await Promise.all([
+      api('/db_admin/api/custom-models'), api('/db_admin/api/models'), api('/db_admin/api/kbs')
+    ]);
+    MODELS = [];
+    cm.data.filter(function (x) { return x.enabled; }).forEach(function (x) {
+      const types = [];
+      (x.targets || []).forEach(function (t) {
+        if (t.enabled && t.model_enabled) {
+          (t.types || []).forEach(function (ty) {
+            if (types.indexOf(ty) < 0) types.push(ty);
+          });
+        }
+      });
+      MODELS.push({ name: x.name, label: x.name + '（对外模型）', types: types,
+                    auto: types.length === 0 });
+    });
+    m.data.forEach(function (x) {
+      if (!x.enabled) return;
+      if (!MODELS.some(function (y) { return y.name === x.model_name; })) {
+        MODELS.push({ name: x.model_name, label: x.model_name + '（' + x.channel_name + '）',
+                      types: x.types || [], auto: false });
+      }
+    });
+    const sel = document.getElementById('pg-model');
+    sel.innerHTML = MODELS.length
+      ? MODELS.map(function (x) { return '<option value="' + esc(x.name) + '">' + esc(x.label) + '</option>'; }).join('')
+      : '<option value="">（还没有可用模型）</option>';
+    sel.addEventListener('change', renderModelTypes);
+    renderModelTypes();
+    KBS = k.data;
+    const useKb = document.getElementById('pg-use-kb');
+    if (!KBS.length) { useKb.checked = false; useKb.disabled = true; }
+    document.getElementById('pg-kbs').innerHTML = KBS.length
+      ? KBS.map(function (kb) {
+          return '<label class="check" style="display:flex;margin:5px 0"><input type="checkbox" class="pg-kb" value="' +
+            kb.id + '"> ' + esc(kb.name) + '<span class="muted" style="margin-left:8px">' + kb.chunk_count + ' 切片</span></label>';
+        }).join('')
+      : '<div class="muted">还没有知识库</div>';
+  }
+
+  document.getElementById('pg-image-file').addEventListener('change', function (e) {
+    const file = e.target.files[0];
+    if (!file) { IMAGE_DATA = ''; return; }
+    const reader = new FileReader();
+    reader.onload = function () {
+      IMAGE_DATA = reader.result;
+      document.getElementById('pg-status').textContent = '已载入图片（' + Math.round(file.size / 1024) + ' KB）';
+    };
+    reader.readAsDataURL(file);
+  });
+
+  function renderModelTypes() {
+    const sel = document.getElementById('pg-model');
+    const box = document.getElementById('pg-model-types');
+    if (!sel || !box) return;
+    const model = MODELS.find(function (x) { return x.name === sel.value; });
+    if (!model) {
+      box.innerHTML = '<span class="muted">未选择模型</span>';
+      return;
+    }
+    if (model.auto) {
+      box.innerHTML = '<span class="muted">能力类型：</span> ' +
+        '<span class="badge primary">自动匹配</span> ' +
+        '<span class="muted">（未限制，按请求内容选择全部已启用模型）</span>';
+      return;
+    }
+    box.innerHTML = '<span class="muted">能力类型：</span> ' +
+      ((model.types && model.types.length)
+        ? typeBadges(model.types)
+        : '<span class="badge gray">未配置能力类型</span>');
+  }
+
+  async function send() {
+    const model = document.getElementById('pg-model').value;
+    const prompt = document.getElementById('pg-prompt').value;
+    const imageUrl = document.getElementById('pg-image-url').value.trim();
+    if (!model) { toast('请先配置模型', 'error'); return; }
+    if (!prompt.trim() && !imageUrl && !IMAGE_DATA) { toast('请输入内容或选择图片', 'error'); return; }
+    const btn = document.getElementById('pg-send');
+    btn.disabled = true;
+    document.getElementById('pg-status').innerHTML = '<span class="spinner"></span> 请求中…';
+    try {
+      const r = await api('/db_admin/api/playground', {
+        method: 'POST',
+        body: {
+          model: model,
+          prompt: prompt,
+          image: IMAGE_DATA || imageUrl,
+          task_type: document.getElementById('pg-type').value,
+          max_tokens: Number(document.getElementById('pg-max').value || 512),
+          temperature: Number(document.getElementById('pg-temp').value || 0.7),
+          use_kb: document.getElementById('pg-use-kb').checked ? 1 : 0,
+          kb_ids: $$('.pg-kb').filter(function (x) { return x.checked; })
+            .map(function (x) { return Number(x.value); })
+        }
+      });
+      document.getElementById('pg-result').style.display = '';
+      document.getElementById('pg-meta').textContent =
+        typeLabel(r.type) + ' · ' + r.channel + ' / ' + r.model + ' · ' + r.elapsed_ms + 'ms' +
+        (r.usage && r.usage.total_tokens ? ' · ' + r.usage.total_tokens + ' tokens' : '');
+      document.getElementById('pg-reply').textContent = r.reply || '（无回复）';
+      document.getElementById('pg-hits').innerHTML = (r.hits && r.hits.length)
+        ? '<h3 style="font-size:13px" class="mb8">命中的知识片段</h3>' + r.hits.map(function (h, i) {
+            return '<div class="card" style="box-shadow:none;padding:10px 12px">' +
+              '<div class="row between"><b>[' + (i + 1) + '] ' + esc(h.title) + '</b>' +
+              '<span class="badge ok">' + h.score + '</span></div>' +
+              '<div class="mt8" style="font-size:12.5px;white-space:pre-wrap">' + esc(h.content) + '</div></div>';
+          }).join('')
+        : '';
+      document.getElementById('pg-status').textContent = '完成';
+    } catch (e) {
+      document.getElementById('pg-status').textContent = '';
+      toast(e.message, 'error');
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
+  init().catch(function (e) { toast(e.message, 'error'); });
+</script>
+{% endblock %}

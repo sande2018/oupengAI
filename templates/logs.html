@@ -1,0 +1,111 @@
+{% extends 'base.html' %}
+{% block subheading %}<div class="sub">每次调度都记录了命中的渠道、模型、Key 与知识库条数</div>{% endblock %}
+{% block actions %}
+  <button class="btn" onclick="load(1)">刷新</button>
+  <button class="btn btn-danger" onclick="clearLogs()">清空日志</button>
+{% endblock %}
+{% block content %}
+<div class="card">
+  <div class="row mb12">
+    <select id="f-ok" onchange="load(1)" style="width:140px">
+      <option value="">全部状态</option>
+      <option value="1">仅成功</option>
+      <option value="0">仅失败</option>
+    </select>
+    <select id="f-type" onchange="load(1)" style="width:160px">
+      <option value="">全部类型</option>
+      <option value="text">文本</option>
+      <option value="vision">图片理解</option>
+      <option value="ocr">图片识别</option>
+      <option value="gen">生图</option>
+      <option value="video_gen">生视频</option>
+      <option value="video_vision">视频识别</option>
+    </select>
+    <input type="text" id="f-q" placeholder="搜索模型 / 渠道 / 错误 / Key 名称" style="flex:1"
+           onkeydown="if(event.key==='Enter') load(1)">
+    <button class="btn" onclick="load(1)">查询</button>
+  </div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr>
+        <th>时间</th><th>接口</th><th>Key</th><th>请求模型</th><th>类型</th>
+        <th>渠道 / 上游模型</th><th>RAG</th><th>状态</th><th>耗时</th><th>错误</th>
+      </tr></thead>
+      <tbody id="log-body"><tr><td colspan="10" class="empty">加载中…</td></tr></tbody>
+    </table>
+  </div>
+  <div class="row between mt12">
+    <div class="sub" id="page-info"></div>
+    <div class="row">
+      <button class="btn btn-sm" id="prev-btn" onclick="prevPage()">上一页</button>
+      <button class="btn btn-sm" id="next-btn" onclick="nextPage()">下一页</button>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  let PAGE = 1;
+  let TOTAL = 0;
+  const SIZE = 50;
+
+  async function load(p) {
+    if (p) PAGE = p;
+    const params = new URLSearchParams({ page: PAGE, size: SIZE });
+    const ok = document.getElementById('f-ok').value;
+    const type = document.getElementById('f-type').value;
+    const q = document.getElementById('f-q').value.trim();
+    if (ok !== '') params.set('ok', ok);
+    if (type) params.set('type', type);
+    if (q) params.set('q', q);
+    const body = document.getElementById('log-body');
+    body.innerHTML = '<tr><td colspan="10" class="empty">加载中…</td></tr>';
+    try {
+      const r = await api('/db_admin/api/logs?' + params.toString());
+      TOTAL = r.total;
+      if (!r.data.length) {
+        body.innerHTML = '<tr><td colspan="10" class="empty">没有匹配的调用记录</td></tr>';
+      } else {
+        body.innerHTML = r.data.map(function (x) {
+          return '<tr>' +
+            '<td class="sub">' + fmtTime(x.created_at) + '</td>' +
+            '<td>' + esc(x.endpoint) + '</td>' +
+            '<td class="sub">' + esc(x.api_key_name || (x.api_key_id ? '#' + x.api_key_id : '后台')) + '</td>' +
+            '<td>' + esc(x.request_model) + '</td>' +
+            '<td><span class="badge primary">' + esc(typeLabel(x.resolved_type)) + '</span></td>' +
+            '<td>' + esc(x.channel_name || '-') + '<div class="sub">' + esc(x.upstream_model || '') +
+              (x.key_label ? ' · ' + esc(x.key_label) : '') + '</div></td>' +
+            '<td>' + (x.rag_hits ? '<span class="badge ok">' + x.rag_hits + '</span>' : '-') + '</td>' +
+            '<td>' + (x.ok ? '<span class="badge ok">成功</span>'
+                          : '<span class="badge danger">' + esc(x.status_code || 'ERR') + '</span>') + '</td>' +
+            '<td class="sub">' + x.latency_ms + 'ms</td>' +
+            '<td class="sub ellipsis" title="' + esc(x.error || '') + '">' + esc(x.error || '') + '</td>' +
+            '</tr>';
+        }).join('');
+      }
+      const pages = Math.max(1, Math.ceil(TOTAL / SIZE));
+      document.getElementById('page-info').textContent =
+        '共 ' + TOTAL + ' 条 · 第 ' + PAGE + ' / ' + pages + ' 页';
+      document.getElementById('prev-btn').disabled = PAGE <= 1;
+      document.getElementById('next-btn').disabled = PAGE >= pages;
+    } catch (e) {
+      body.innerHTML = '<tr><td colspan="10" class="empty">' + esc(e.message) + '</td></tr>';
+    }
+  }
+
+  function prevPage() { if (PAGE > 1) load(PAGE - 1); }
+  function nextPage() { load(PAGE + 1); }
+
+  async function clearLogs() {
+    if (!confirm('清空全部调用日志？不影响渠道与 Key 配置。')) return;
+    try {
+      await api('/db_admin/api/logs', { method: 'DELETE' });
+      toast('已清空', 'ok');
+      load(1);
+    } catch (e) { toast(e.message, 'error'); }
+  }
+
+  load(1).catch(function (e) { toast(e.message, 'error'); });
+</script>
+{% endblock %}

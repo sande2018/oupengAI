@@ -1,0 +1,633 @@
+{% extends 'base.html' %}
+{% block subheading %}<div class="sub">先给渠道挂模型并勾选能力类型，再把它们组合成一个对外模型名</div>{% endblock %}
+{% block actions %}
+  <button class="btn" onclick="switchTab('models')">渠道模型</button>
+  <button class="btn btn-primary" onclick="switchTab('custom')">对外模型</button>
+{% endblock %}
+{% block content %}
+<div class="tabs">
+  <button id="tab-btn-models" class="on" onclick="switchTab('models')">渠道模型</button>
+  <button id="tab-btn-custom" onclick="switchTab('custom')">对外模型（调度组）</button>
+</div>
+
+<div id="pane-models">
+  <div class="notice">
+    同一个模型可以勾选多种能力，例如一个多模态模型同时勾「文本」和「图片理解」。
+    调用的兜底链是：图片理解 → 图片识别，文本 → 图片理解，因此只要配了视觉模型，纯文本请求也能兜底。
+  </div>
+  <div class="card">
+    <div class="card-header">
+      <div class="row">
+        <label class="muted">按渠道筛选</label>
+        <select id="filter-channel" onchange="renderModels()" style="width:220px"></select>
+      </div>
+      <div class="row">
+        <button class="btn" onclick="openRemoteModels()">从上游获取模型</button>
+        <button class="btn btn-primary" onclick="editModel(null)">+ 新增模型</button>
+      </div>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr>
+          <th>渠道</th><th>模型名</th><th>能力类型</th><th>优先级</th>
+          <th>权重</th><th>状态</th><th>操作</th>
+        </tr></thead>
+        <tbody id="model-body"><tr><td colspan="7" class="empty">加载中…</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<div id="pane-custom" style="display:none">
+  <div class="notice warn">
+    客户端请求里的 <span class="kbd">model</span> 就填这里的名字（例如 <span class="kbd">oupeng</span>）。
+    勾选哪些渠道模型，本服务就只在它们之间调度；一个都不勾时自动使用全部启用的模型。
+  </div>
+  <div class="card">
+    <div class="card-header">
+      <div class="sub">调度策略：priority = 按优先级依次尝试（故障切换）；weighted = 按权重轮询（负载均衡）</div>
+      <button class="btn btn-primary" onclick="editCustom(null)">+ 新建对外模型</button>
+    </div>
+    <div id="custom-list" class="muted">加载中…</div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  let MODELS = [];
+  let CHANNELS = [];
+  let CUSTOMS = [];
+  let AI_TYPES = [];
+
+  async function load() {
+    const [m, c, cm, t] = await Promise.all([
+      api('/db_admin/api/models'), api('/db_admin/api/channels'),
+      api('/db_admin/api/custom-models'), api('/db_admin/api/ai-types')
+    ]);
+    MODELS = m.data; CHANNELS = c.data; CUSTOMS = cm.data; AI_TYPES = t.data;
+    const sel = document.getElementById('filter-channel');
+    const cur = sel.value;
+    sel.innerHTML = '<option value="">全部渠道</option>' + CHANNELS.map(function (ch) {
+      return '<option value="' + ch.id + '">' + esc(ch.name) + '</option>';
+    }).join('');
+    sel.value = cur;
+    renderModels();
+    renderCustoms();
+  }
+
+  function switchTab(name) {
+    document.getElementById('pane-models').style.display = name === 'models' ? '' : 'none';
+    document.getElementById('pane-custom').style.display = name === 'custom' ? '' : 'none';
+    document.getElementById('tab-btn-models').className = name === 'models' ? 'on' : '';
+    document.getElementById('tab-btn-custom').className = name === 'custom' ? 'on' : '';
+  }
+
+  // ---------- 渠道模型 ----------
+  function renderModels() {
+    const filter = document.getElementById('filter-channel').value;
+    const list = MODELS.filter(function (m) { return !filter || String(m.channel_id) === filter; });
+    const body = document.getElementById('model-body');
+    if (!list.length) {
+      body.innerHTML = '<tr><td colspan="7" class="empty">还没有模型。先在「渠道与 Key」建渠道，再回来添加模型</td></tr>';
+      return;
+    }
+    body.innerHTML = list.map(function (m) {
+      return '<tr>' +
+        '<td>' + esc(m.channel_name) + (m.channel_enabled ? '' : ' <span class="badge gray">渠道停用</span>') + '</td>' +
+        '<td><b>' + esc(m.model_name) + '</b>' + (m.remark ? '<div class="sub">' + esc(m.remark) + '</div>' : '') + '</td>' +
+        '<td>' + typeBadges(m.types) + '</td>' +
+        '<td class="sub">' + m.priority + '</td>' +
+        '<td class="sub">' + m.weight + '</td>' +
+        '<td><button type="button" class="badge ' + (m.enabled ? 'ok' : 'gray') +
+          ' badge-btn" title="点击' + (m.enabled ? '停用' : '启用') + '模型" ' +
+          'onclick="toggleModel(' + m.id + ')">' +
+          (m.enabled ? '启用' : '停用') + '</button></td>' +
+        '<td class="actions">' +
+          '<button class="btn btn-sm" onclick="editModel(' + m.id + ')">编辑</button> ' +
+          '<button class="btn btn-sm" onclick="chooseTest(' + m.id + ')">测试</button> ' +
+          '<button class="btn btn-sm btn-danger" onclick="delModel(' + m.id + ')">删除</button>' +
+        '</td></tr>';
+    }).join('');
+  }
+
+  function typeChecks(selected) {
+    const on = selected || [];
+    return AI_TYPES.map(function (t) {
+      const checked = on.indexOf(t.key) >= 0;
+      return '<label class="type-check ' + (checked ? 'on' : '') + '" data-type="' + t.key + '">' +
+        '<input type="checkbox" value="' + t.key + '" ' + (checked ? 'checked' : '') + '>' +
+        esc(t.label) + '</label>';
+    }).join('');
+  }
+
+  function bindTypeChecks(root) {
+    $$('.type-check', root).forEach(function (label) {
+      const cb = label.querySelector('input');
+      const sync = function () {
+        label.classList.toggle('on', cb.checked);
+        // 类型被改动后，旧的测试结果不再可信，清掉着色与提示
+        label.classList.remove('test-ok', 'test-fail');
+        label.removeAttribute('title');
+      };
+      sync();
+      cb.addEventListener('change', sync);
+    });
+  }
+
+  function modelForm(m) {
+    m = m || { channel_id: CHANNELS.length ? CHANNELS[0].id : '', model_name: '', types: ['text'],
+               priority: 100, weight: 100, timeout: 0, remark: '', enabled: 1, sort: 0 };
+    return '<div class="form-grid">' +
+      '<div class="field"><label>所属渠道</label><select id="f-channel">' +
+        CHANNELS.map(function (c) {
+          return '<option value="' + c.id + '" ' + (Number(m.channel_id) === c.id ? 'selected' : '') + '>' + esc(c.name) + '</option>';
+        }).join('') + '</select></div>' +
+      '<div class="field"><label>上游模型名</label><input id="f-model" type="text" value="' + esc(m.model_name) + '" placeholder="gpt-4o-mini / claude-3-5-sonnet ...">' +
+        '<div class="tip">必须和上游接口认的模型名完全一致</div></div>' +
+      '<div class="field full"><label>能力类型（可多选）</label>' +
+        '<div class="checks" id="f-types">' + typeChecks(m.types) + '</div>' +
+        '<div class="row mt8">' +
+          '<button type="button" class="btn btn-sm" onclick="testFormModel(this)">测试选中类型</button>' +
+          '<span class="sub" id="f-test-msg"></span>' +
+        '</div>' +
+        '<div class="tip">测试会真实请求一次上游，不写 Key 冷却与渠道熔断状态。</div>' +
+      '</div>' +
+      '<div class="field"><label>优先级（小优先）</label><input id="f-priority" type="number" value="' + m.priority + '"></div>' +
+      '<div class="field"><label>权重（weighted 策略用）</label><input id="f-weight" type="number" min="1" value="' + m.weight + '"></div>' +
+      '<div class="field"><label>单次超时（秒，0=用渠道超时）</label><input id="f-timeout" type="number" min="0" value="' + (m.timeout || 0) + '"></div>' +
+      '<div class="field"><label>状态</label><label class="check"><input id="f-enabled" type="checkbox" ' + (m.enabled === 0 ? '' : 'checked') + '>启用</label></div>' +
+      '<div class="field full"><label>备注</label><input id="f-remark" type="text" value="' + esc(m.remark || '') + '"></div>' +
+      '</div>';
+  }
+
+  function editModel(id) {
+    if (!CHANNELS.length) { toast('请先创建渠道', 'error'); return; }
+    const m = id ? MODELS.find(function (x) { return x.id === id; }) : null;
+    const mask = openModal(id ? '编辑模型' : '新增模型', modelForm(m), async function (root) {
+      const types = $$('#f-types input', root).filter(function (x) { return x.checked; })
+        .map(function (x) { return x.value; });
+      if (!types.length) throw new Error('至少勾选一种能力类型');
+      const payload = {
+        channel_id: Number(root.querySelector('#f-channel').value),
+        model_name: root.querySelector('#f-model').value.trim(),
+        types: types,
+        priority: Number(root.querySelector('#f-priority').value || 100),
+        weight: Number(root.querySelector('#f-weight').value || 100),
+        timeout: Number(root.querySelector('#f-timeout').value || 0),
+        enabled: root.querySelector('#f-enabled').checked ? 1 : 0,
+        remark: root.querySelector('#f-remark').value.trim()
+      };
+      if (!payload.model_name) throw new Error('请填写上游模型名');
+      await api(id ? '/db_admin/api/models/' + id : '/db_admin/api/models', {
+        method: id ? 'PUT' : 'POST', body: payload
+      });
+      toast('已保存', 'ok');
+      await load();
+    }, { wide: true });
+    bindTypeChecks(mask);
+  }
+
+  // 手动新增/编辑模型时，按当前填写的渠道 + 模型名测试勾选的能力类型
+  async function testFormModel(btn) {
+    const root = btn.closest('.modal-mask');
+    if (!root) return;
+    const cid = Number(root.querySelector('#f-channel').value);
+    const name = root.querySelector('#f-model').value.trim();
+    const chips = $$('#f-types .type-check', root);
+    const types = chips.filter(function (el) {
+      return el.querySelector('input').checked;
+    }).map(function (el) {
+      return el.querySelector('input').value;
+    });
+    const msg = root.querySelector('#f-test-msg');
+    if (!cid) { toast('请先选择渠道', 'error'); return; }
+    if (!name) { toast('请先填写上游模型名', 'error'); return; }
+    if (!types.length) { toast('请先勾选要测试的能力类型', 'error'); return; }
+
+    const oldText = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = '测试中…';
+    if (msg) { msg.textContent = ''; msg.className = 'sub'; }
+    chips.forEach(function (el) {
+      el.classList.remove('test-ok', 'test-fail');
+      el.removeAttribute('title');
+    });
+    try {
+      const r = await api('/db_admin/api/channels/' + cid + '/test-model', {
+        method: 'POST', body: { model_name: name, types: types }
+      });
+      let passed = 0;
+      const fails = [];
+      r.data.forEach(function (item) {
+        const chip = root.querySelector('#f-types .type-check[data-type="' + item.type + '"]');
+        if (chip) {
+          chip.classList.add(item.ok ? 'test-ok' : 'test-fail');
+          const detail = item.ok
+            ? (item.reply || '（已返回）') + ' · ' + item.elapsed_ms + 'ms'
+            : (item.error || '未通过') + (item.elapsed_ms ? ' · ' + item.elapsed_ms + 'ms' : '');
+          chip.title = typeLabel(item.type) + '：' + (item.ok ? '通过' : '未通过') + '\n' + detail;
+        }
+        if (item.ok) passed++;
+        else fails.push(typeLabel(item.type));
+      });
+      if (msg) {
+        msg.textContent = passed + '/' + r.data.length + ' 通过' +
+          (fails.length ? '（' + fails.join('、') + ' 未通过）' : '');
+        msg.className = 'sub ' + (fails.length ? 'danger-text' : 'ok-text');
+      }
+      toast('测试完成：' + passed + '/' + r.data.length + ' 通过',
+        fails.length ? 'error' : 'ok');
+    } catch (e) {
+      if (msg) { msg.textContent = e.message; msg.className = 'sub danger-text'; }
+      toast(e.message, 'error');
+    } finally {
+      btn.disabled = false;
+      btn.textContent = oldText;
+    }
+  }
+
+  async function delModel(id) {
+    const m = MODELS.find(function (x) { return x.id === id; });
+    if (!confirm('删除模型「' + m.model_name + '」？相关调度关联会一起删除。')) return;
+    try {
+      await api('/db_admin/api/models/' + id, { method: 'DELETE' });
+      toast('已删除', 'ok');
+      await load();
+    } catch (e) { toast(e.message, 'error'); }
+  }
+
+  async function toggleModel(id) {
+    const m = MODELS.find(function (x) { return x.id === id; });
+    if (!m) return;
+    const next = m.enabled ? '停用' : '启用';
+    const tip = m.enabled
+      ? '停用后调度不会再选中它，已配置的类型会保留。'
+      : '启用后它会重新参与调度。';
+    if (!confirm(next + '模型「' + m.model_name + '」？\n' + tip)) return;
+    try {
+      const r = await api('/db_admin/api/models/' + id + '/toggle', { method: 'POST' });
+      toast('已' + (r.enabled ? '启用' : '停用') + '「' + r.model_name + '」', 'ok');
+      await load();
+    } catch (e) { toast(e.message, 'error'); }
+  }
+
+  function chooseTest(id) {
+    const m = MODELS.find(function (x) { return x.id === id; });
+    const html = '<p class="muted">选择要测试的能力类型（会真实调用一次上游，消耗少量额度）：</p>' +
+      '<div class="row mt8">' + m.types.map(function (t) {
+        return '<button class="btn" onclick="runTest(' + id + ',\'' + t + '\')">' + esc(typeLabel(t)) + '</button>';
+      }).join('') + '</div><div id="test-out" class="mt12"></div>';
+    openModal('测试：' + m.model_name, html, null, { wide: true });
+  }
+
+  async function runTest(id, type) {
+    const out = document.getElementById('test-out');
+    out.innerHTML = '<span class="spinner"></span> 正在调用上游…';
+    try {
+      const r = await api('/db_admin/api/models/' + id + '/test', { method: 'POST', body: { type: type } });
+      out.innerHTML = '<div class="notice ' + (r.ok ? '' : 'warn') + '">' +
+        (r.ok ? '<b>通过</b> · ' + r.elapsed_ms + 'ms · ' + esc(r.channel) + ' / ' + esc(r.model) + ' [' + esc(r.key) + ']'
+              : '<b>失败</b> · ' + esc(r.error || '')) + '</div>' +
+        (r.ok ? '<pre>' + esc(r.reply || '') + '</pre>' : '') +
+        (r.attempts && r.attempts.length ? '<div class="sub mt8">尝试记录：<pre>' + esc(JSON.stringify(r.attempts, null, 2)) + '</pre></div>' : '');
+    } catch (e) {
+      out.innerHTML = '<div class="notice warn">' + esc(e.message) + '</div>';
+    }
+  }
+
+  // ---------- 对外模型 ----------
+  function renderCustoms() {
+    const box = document.getElementById('custom-list');
+    if (!CUSTOMS.length) {
+      box.innerHTML = '<div class="empty">还没有对外模型。点「新建对外模型」，模型名填 oupeng 之类，然后勾选要调度的渠道模型</div>';
+      return;
+    }
+    box.innerHTML = CUSTOMS.map(function (cm) {
+      const targets = cm.targets || [];
+      const rows = targets.length ? targets.map(function (t) {
+        return '<tr><td>' + esc(t.channel_name) + '</td><td>' + esc(t.model_name) +
+          '</td><td>' + typeBadges(t.types) + '</td><td class="sub">' + t.priority +
+          '</td><td class="sub">' + t.weight + '</td><td>' +
+          (t.enabled ? '<span class="badge ok">参与</span>' : '<span class="badge gray">排除</span>') +
+          (t.model_enabled ? '' : ' <span class="badge warn">模型停用</span>') + '</td></tr>';
+      }).join('') : '<tr><td colspan="6" class="empty">未勾选目标，将自动使用全部启用模型</td></tr>';
+      return '<div class="card" style="box-shadow:none">' +
+        '<div class="card-header"><div><b style="font-size:15px">' + esc(cm.name) + '</b> ' +
+          '<span class="badge primary">' + esc(cm.strategy) + '</span> ' +
+          (cm.enabled ? '<span class="badge ok">启用</span>' : '<span class="badge gray">停用</span>') +
+          '<div class="sub">' + esc(cm.display_name || '') + (cm.description ? ' · ' + esc(cm.description) : '') + '</div></div>' +
+        '<div><button class="btn btn-sm" onclick="editCustom(' + cm.id + ')">编辑</button> ' +
+          '<button class="btn btn-sm btn-danger" onclick="delCustom(' + cm.id + ')">删除</button></div></div>' +
+        '<div class="table-wrap"><table><thead><tr><th>渠道</th><th>模型</th><th>类型</th>' +
+        '<th>优先级</th><th>权重</th><th>状态</th></tr></thead><tbody>' + rows + '</tbody></table></div>' +
+        '</div>';
+    }).join('');
+  }
+
+  function customForm(cm) {
+    cm = cm || { name: '', display_name: '', description: '', strategy: 'priority', enabled: 1, targets: [] };
+    const sel = {};
+    (cm.targets || []).forEach(function (t) { sel[t.channel_model_id] = t; });
+    const rows = MODELS.map(function (m) {
+      const t = sel[m.id] || {};
+      const on = sel[m.id] ? !!t.enabled : false;
+      return '<tr class="target-row" data-id="' + m.id + '">' +
+        '<td><label class="check"><input type="checkbox" class="t-on" ' + (on ? 'checked' : '') + '></label></td>' +
+        '<td>' + esc(m.channel_name) + '<div class="sub">' + esc(m.model_name) + '</div></td>' +
+        '<td>' + typeBadges(m.types) + '</td>' +
+        '<td><input type="number" class="t-pri" value="' + (t.priority || 100) + '" style="width:80px"></td>' +
+        '<td><input type="number" class="t-weight" min="1" value="' + (t.weight || 100) + '" style="width:80px"></td>' +
+        '</tr>';
+    }).join('');
+    return '<div class="form-grid">' +
+      '<div class="field"><label>对外模型名</label><input id="c-name" type="text" value="' + esc(cm.name) + '" placeholder="oupeng">' +
+        '<div class="tip">客户端 model 参数填这个；只能用字母/数字/-/_/./:</div></div>' +
+      '<div class="field"><label>显示名称</label><input id="c-display" type="text" value="' + esc(cm.display_name || '') + '"></div>' +
+      '<div class="field"><label>调度策略</label><select id="c-strategy">' +
+        '<option value="priority" ' + (cm.strategy === 'priority' ? 'selected' : '') + '>priority（按优先级故障切换）</option>' +
+        '<option value="weighted" ' + (cm.strategy === 'weighted' ? 'selected' : '') + '>weighted（按权重轮询负载均衡）</option>' +
+        '</select></div>' +
+      '<div class="field"><label>状态</label><label class="check"><input id="c-enabled" type="checkbox" ' + (cm.enabled === 0 ? '' : 'checked') + '>启用</label></div>' +
+      '<div class="field full"><label>描述</label><input id="c-desc" type="text" value="' + esc(cm.description || '') + '"></div>' +
+      '</div>' +
+      '<h3 class="mt16 mb8" style="font-size:13.5px">参与调度的模型</h3>' +
+      '<div class="table-wrap"><table><thead><tr><th style="width:44px">启用</th><th>渠道 / 模型</th>' +
+      '<th>类型</th><th>优先级</th><th>权重</th></tr></thead><tbody>' + rows + '</tbody></table></div>';
+  }
+
+  function editCustom(id) {
+    if (!MODELS.length) { toast('请先添加渠道模型', 'error'); return; }
+    const cm = id ? CUSTOMS.find(function (x) { return x.id === id; }) : null;
+    openModal(id ? '编辑对外模型' : '新建对外模型', customForm(cm), async function (root) {
+      const targets = $$('.target-row', root).filter(function (r) {
+        return r.querySelector('.t-on').checked;
+      }).map(function (r) {
+        return {
+          channel_model_id: Number(r.dataset.id),
+          priority: Number(r.querySelector('.t-pri').value || 100),
+          weight: Number(r.querySelector('.t-weight').value || 100),
+          enabled: 1
+        };
+      });
+      const payload = {
+        name: root.querySelector('#c-name').value.trim(),
+        display_name: root.querySelector('#c-display').value.trim(),
+        description: root.querySelector('#c-desc').value.trim(),
+        strategy: root.querySelector('#c-strategy').value,
+        enabled: root.querySelector('#c-enabled').checked ? 1 : 0,
+        targets: targets
+      };
+      if (!payload.name) throw new Error('请填写对外模型名');
+      await api(id ? '/db_admin/api/custom-models/' + id : '/db_admin/api/custom-models', {
+        method: id ? 'PUT' : 'POST', body: payload
+      });
+      toast('已保存', 'ok');
+      await load();
+    }, { wide: true });
+  }
+
+  async function delCustom(id) {
+    const cm = CUSTOMS.find(function (x) { return x.id === id; });
+    if (!confirm('删除对外模型「' + cm.name + '」？客户端将无法再用这个模型名调用。')) return;
+    try {
+      await api('/db_admin/api/custom-models/' + id, { method: 'DELETE' });
+      toast('已删除', 'ok');
+      await load();
+    } catch (e) { toast(e.message, 'error'); }
+  }
+
+  // ---------- 从上游拉取模型 ----------
+  // 记住每个渠道手动勾选过的模型与类型：第二次拉取时恢复，避免重复勾选
+  function rmSelKey(cid) { return 'oupeng.rm.selected.' + cid; }
+
+  function rmSelLoad(cid) {
+    try {
+      var raw = localStorage.getItem(rmSelKey(cid));
+      var obj = raw ? JSON.parse(raw) : {};
+      return (obj && typeof obj === 'object') ? obj : {};
+    } catch (e) { return {}; }
+  }
+
+  function rmSelUpdate(cid, name, patch) {
+    try {
+      var sel = rmSelLoad(cid);
+      var rec = sel[name] || {};
+      Object.keys(patch).forEach(function (k) { rec[k] = patch[k]; });
+      sel[name] = rec;
+      localStorage.setItem(rmSelKey(cid), JSON.stringify(sel));
+    } catch (e) { /* 隐私模式禁用 localStorage 时忽略 */ }
+  }
+
+  function rmSelForget(cid, names) {
+    try {
+      var sel = rmSelLoad(cid);
+      (names || []).forEach(function (n) { delete sel[n]; });
+      localStorage.setItem(rmSelKey(cid), JSON.stringify(sel));
+    } catch (e) { /* ignore */ }
+  }
+
+  function remoteForm(defaultCh) {
+    return '<div class="form-grid">' +
+      '<div class="field"><label>渠道</label><select id="rm-channel">' +
+        CHANNELS.map(function (c) {
+          return '<option value="' + c.id + '" ' +
+            (Number(defaultCh) === c.id ? 'selected' : '') + '>' + esc(c.name) + '</option>';
+        }).join('') +
+      '</select></div>' +
+      '<div class="field"><label>&nbsp;</label>' +
+        '<button type="button" class="btn" id="rm-refresh">重新获取</button></div>' +
+      '<div class="field full"><label>视频识别测试 URL</label>' +
+        '<input type="text" id="rm-video" value="https://www.w3schools.com/html/mov_bbb.mp4">' +
+        '<div class="tip">仅测试「视频识别」时使用，上游必须能访问该地址</div></div>' +
+      '</div>' +
+      '<div class="notice mt8" style="margin-bottom:0">模型列表来自上游 ' +
+      '<span class="kbd">GET /models</span>。能力类型会按模型名给出「建议」，但默认不勾选；' +
+      '已启用模型默认勾选，取消勾选并保存 = 停用。勾选状态会记住，下次拉取自动恢复。</div>' +
+      '<div id="rm-body" class="mt12"></div>';
+  }
+
+  async function fetchRemote(cid, root) {
+    const body = root.querySelector('#rm-body');
+    if (!body) return;
+    body.innerHTML = '<div class="empty"><span class="spinner"></span> 正在请求上游模型列表…</div>';
+    try {
+      const r = await api('/db_admin/api/channels/' + cid + '/remote-models');
+      if (!r.data.length) {
+        body.innerHTML = '<div class="empty">上游没有返回任何模型</div>';
+        return;
+      }
+      const saved = rmSelLoad(cid);
+      const pending = r.data.filter(function (m) { return !m.exists; }).length;
+      body.innerHTML =
+        '<div class="sub mb8">共 ' + r.count + ' 个模型（未导入 ' + pending + ' 个） · Key：' +
+          esc(r.key_label || '-') + ' · ' + esc(r.endpoint || '') + '</div>' +
+        '<div class="table-wrap"><table><thead><tr>' +
+        '<th style="width:44px">启用</th><th>模型名</th><th>能力类型（可改）</th>' +
+        '<th>状态</th><th style="width:110px">测试</th>' +
+        '</tr></thead><tbody>' +
+        r.data.map(function (m) {
+          const rec = saved[m.id] || {};
+          const types = rec.types || (m.exists ? (m.suggested_types || []) : []);
+          const suggested = (!m.exists && (m.suggested_types || []).length)
+            ? '<div class="sub">建议：' + m.suggested_types.map(function (t) {
+                return typeLabel(t);
+              }).join(' / ') + '</div>'
+            : '';
+          // 已启用：默认勾选（手动取消则保持取消）；已停用：默认不勾（手动勾选则重新启用）
+          // 新模型第一次默认不勾，之后按上次手动勾选的结果恢复
+          const checked = rec.checked !== undefined
+            ? !!rec.checked
+            : (m.exists ? !!m.enabled : false);
+          return '<tr class="rm-row" data-name="' + esc(m.id) +
+            '" data-exists="' + (m.exists ? '1' : '0') + '">' +
+            '<td><label class="check"><input type="checkbox" class="rm-on" ' +
+              (checked ? 'checked' : '') + '></label></td>' +
+            '<td><b>' + esc(m.id) + '</b><div class="sub">' +
+              esc(m.owned_by || '') + '</div>' + suggested + '</td>' +
+            '<td><div class="checks">' + typeChecks(types) + '</div></td>' +
+            '<td>' + (m.exists
+              ? (m.enabled ? '<span class="badge ok">已存在</span>'
+                           : '<span class="badge gray">已停用</span>')
+              : '<span class="badge">新模型</span>') + '</td>' +
+            '<td><button type="button" class="btn btn-sm rm-test" ' +
+              'onclick="testRemoteRow(this)">测试</button>' +
+              '<div class="sub rm-test-msg"></div></td>' +
+            '</tr>';
+        }).join('') +
+        '</tbody></table></div>';
+      bindTypeChecks(body);
+      // 勾选变化实时写入 localStorage，下次拉取时恢复
+      $$('.rm-row', body).forEach(function (row) {
+        const name = row.dataset.name;
+        const cb = row.querySelector('.rm-on');
+        if (cb) {
+          cb.addEventListener('change', function () {
+            rmSelUpdate(cid, name, { checked: cb.checked });
+          });
+        }
+        $$('.type-check input', row).forEach(function (input) {
+          input.addEventListener('change', function () {
+            const picked = $$('.type-check input', row)
+              .filter(function (x) { return x.checked; })
+              .map(function (x) { return x.value; });
+            rmSelUpdate(cid, name, { types: picked });
+          });
+        });
+      });
+    } catch (e) {
+      body.innerHTML = '<div class="notice warn" style="margin-bottom:0">' +
+        esc(e.message) + '</div>';
+    }
+  }
+
+  function openRemoteModels(channelId) {
+    if (!CHANNELS.length) { toast('请先创建渠道', 'error'); return; }
+    const filter = document.getElementById('filter-channel').value;
+    const defaultCh = channelId || filter || CHANNELS[0].id;
+    const mask = openModal('从上游获取模型', remoteForm(defaultCh), async function (root) {
+      const cid = Number(root.querySelector('#rm-channel').value);
+      const models = [];
+      $$('.rm-row', root).forEach(function (row) {
+        const name = row.dataset.name;
+        const exists = row.dataset.exists === '1';
+        const checked = row.querySelector('.rm-on').checked;
+        if (!checked) {
+          // 取消勾选的已存在模型 → 停用（类型保留）；未勾选的新模型则忽略
+          if (exists) models.push({ model_name: name, enabled: 0 });
+          return;
+        }
+        const types = $$('.type-check input', row)
+          .filter(function (x) { return x.checked; })
+          .map(function (x) { return x.value; });
+        if (!types.length) throw new Error('模型 ' + name + ' 至少选一种能力类型');
+        models.push({ model_name: name, types: types, enabled: 1 });
+      });
+      if (!models.length) throw new Error('没有需要保存的变化');
+      const r = await api('/db_admin/api/channels/' + cid + '/remote-models/import', {
+        method: 'POST', body: { models: models }
+      });
+      rmSelForget(cid, models.map(function (m) { return m.model_name; }));
+      toast('保存完成：新增 ' + r.created + '，更新 ' + r.updated +
+        (r.disabled ? '，停用 ' + r.disabled : '') +
+        (r.skipped ? '，跳过 ' + r.skipped : ''), 'ok');
+      await load();
+    }, { wide: true });
+
+    mask.querySelector('#rm-refresh').addEventListener('click', function () {
+      fetchRemote(Number(mask.querySelector('#rm-channel').value), mask);
+    });
+    mask.querySelector('#rm-channel').addEventListener('change', function () {
+      fetchRemote(Number(this.value), mask);
+    });
+    fetchRemote(Number(defaultCh), mask);
+  }
+
+  async function testRemoteRow(btn) {
+    const row = btn.closest('.rm-row');
+    const root = btn.closest('.modal-mask');
+    if (!row || !root) return;
+    const cid = Number(root.querySelector('#rm-channel').value);
+    const name = row.dataset.name;
+    const types = $$('.type-check input', row)
+      .filter(function (x) { return x.checked; })
+      .map(function (x) { return x.value; });
+    if (!types.length) {
+      toast('请先勾选要测试的能力类型', 'error');
+      return;
+    }
+    const video = root.querySelector('#rm-video');
+    const msg = row.querySelector('.rm-test-msg');
+    const oldText = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = '测试中…';
+    msg.className = 'sub rm-test-msg';
+    msg.textContent = '';
+    $$('.type-check', row).forEach(function (el) {
+      el.classList.remove('test-ok', 'test-fail');
+      el.removeAttribute('title');
+    });
+    try {
+      const r = await api('/db_admin/api/channels/' + cid + '/test-model', {
+        method: 'POST',
+        body: {
+          model_name: name,
+          types: types,
+          video_url: video ? video.value.trim() : ''
+        }
+      });
+      let passed = 0;
+      const fails = [];
+      r.data.forEach(function (item) {
+        const chip = row.querySelector('.type-check[data-type="' + item.type + '"]');
+        if (chip) {
+          chip.classList.add(item.ok ? 'test-ok' : 'test-fail');
+          const detail = item.ok
+            ? (item.reply || '（已返回）') + ' · ' + item.elapsed_ms + 'ms'
+            : (item.error || '未通过') + (item.elapsed_ms ? ' · ' + item.elapsed_ms + 'ms' : '');
+          chip.title = typeLabel(item.type) + '：' + (item.ok ? '通过' : '未通过') + '\n' + detail;
+        }
+        if (item.ok) passed++;
+        else fails.push(typeLabel(item.type));
+      });
+      msg.textContent = passed + '/' + r.data.length + ' 通过' +
+        (fails.length ? '（' + fails.join('、') + ' 未通过）' : '');
+      msg.className = 'sub rm-test-msg ' + (fails.length ? 'danger-text' : 'ok-text');
+      toast('测试完成：' + passed + '/' + r.data.length + ' 通过',
+        fails.length ? 'error' : 'ok');
+    } catch (e) {
+      msg.textContent = e.message;
+      msg.className = 'sub rm-test-msg danger-text';
+      toast(e.message, 'error');
+    } finally {
+      btn.disabled = false;
+      btn.textContent = oldText;
+    }
+  }
+
+  load().then(function () {
+    const fetchId = new URLSearchParams(location.search).get('fetch');
+    if (fetchId) openRemoteModels(Number(fetchId));
+  }).catch(function (e) { toast(e.message, 'error'); });
+</script>
+{% endblock %}

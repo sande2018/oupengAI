@@ -1,0 +1,187 @@
+{% extends 'base.html' %}
+{% block subheading %}<div class="sub">一个渠道 = 一个上游服务；渠道内可放多组 Key、多个模型</div>{% endblock %}
+{% block actions %}
+  <button class="btn btn-primary" onclick="editChannel(null)">+ 新增渠道</button>
+{% endblock %}
+{% block content %}
+<div class="notice">
+  <span>Base URL 要写到版本号为止，例如 <span class="kbd">https://api.openai.com/v1</span>，
+  本服务会自动拼接 <span class="kbd">/chat/completions</span>、<span class="kbd">/images/generations</span> 等路径。
+  同一渠道填多组 Key 会自动轮换，遇到 401/429 只冷却那一个 Key。</span>
+</div>
+<div class="card">
+  <div class="table-wrap">
+    <table>
+      <thead><tr>
+        <th>渠道</th><th>Key</th><th>模型（已勾选类型）</th><th>状态</th>
+        <th>超时</th><th>操作</th>
+      </tr></thead>
+      <tbody id="channel-body"><tr><td colspan="6" class="empty">加载中…</td></tr></tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  let CHANNELS = [];
+  let AI_TYPES = [];
+
+  async function load() {
+    const [c, t] = await Promise.all([api('/db_admin/api/channels'), api('/db_admin/api/ai-types')]);
+    CHANNELS = c.data;
+    AI_TYPES = t.data;
+    render();
+  }
+
+  function render() {
+    const body = document.getElementById('channel-body');
+    if (!CHANNELS.length) {
+      body.innerHTML = '<tr><td colspan="6" class="empty">还没有渠道，点右上角「新增渠道」开始</td></tr>';
+      return;
+    }
+    body.innerHTML = CHANNELS.map(function (ch) {
+      const modelBadges = ch.models.length
+        ? ch.models.map(function (m) {
+            return '<div>' + esc(m.model_name) + ' ' + typeBadges(m.types) +
+              (m.enabled ? '' : ' <span class="badge gray">停用</span>') + '</div>';
+          }).join('')
+        : '<span class="muted">该渠道还没有模型</span>';
+      const keyInfo = ch.key_count + ' 组';
+      return '<tr>' +
+        '<td><b>' + esc(ch.name) + '</b>' +
+          '<div class="sub">' + esc(ch.base_url) + '</div>' +
+          (ch.remark ? '<div class="sub">' + esc(ch.remark) + '</div>' : '') + '</td>' +
+        '<td>' + keyInfo + '</td>' +
+        '<td>' + modelBadges + '</td>' +
+        '<td><button type="button" class="badge ' + (ch.enabled ? 'ok' : 'gray') +
+          ' badge-btn" title="点击' + (ch.enabled ? '停用' : '启用') + '渠道" ' +
+          'onclick="toggleChannel(' + ch.id + ')">' +
+          (ch.enabled ? '启用' : '停用') + '</button>' +
+          (chdis(ch) ? '<div class="badge warn mt8">熔断冷却中</div>' : '') + '</td>' +
+        '<td class="sub">' + ch.timeout + 's</td>' +
+        '<td class="actions">' +
+          '<button class="btn btn-sm" onclick="editChannel(' + ch.id + ')">编辑</button> ' +
+          '<button class="btn btn-sm" onclick="testChannel(' + ch.id + ')">测试</button> ' +
+          '<a class="btn btn-sm" href="/db_admin/models?fetch=' + ch.id + '">拉模型</a> ' +
+          '<button class="btn btn-sm btn-danger" onclick="delChannel(' + ch.id + ')">删除</button>' +
+        '</td></tr>';
+    }).join('');
+  }
+
+  function chdis(ch) {
+    return ch.disabled_until && ch.disabled_until > Date.now() / 1000;
+  }
+
+  function keyRow(k) {
+    k = k || {};
+    return '<div class="key-row" data-id="' + (k.id || '') + '">' +
+      '<input type="text" class="k-label" placeholder="备注（如 主 Key）" value="' + esc(k.label || '') + '">' +
+      '<input type="text" class="k-value" autocomplete="new-password" placeholder="' +
+        (k.id ? esc(k.masked || '') + '（留空保持不变）' : 'sk-...') + '">' +
+      '<label class="check"><input type="checkbox" class="k-enabled" ' + (k.enabled === 0 ? '' : 'checked') + '>启用</label>' +
+      '<button type="button" class="btn btn-sm btn-danger" onclick="this.closest(\'.key-row\').remove()">删除</button>' +
+      '</div>';
+  }
+
+  function addKeyRow() {
+    document.getElementById('keys-box').insertAdjacentHTML('beforeend', keyRow(null));
+  }
+
+  function channelForm(ch) {
+    ch = ch || { name: '', base_url: '', video_path: '/videos/generations', timeout: 180,
+                 remark: '', sort: 0, enabled: 1, keys: [] };
+    const html = '<div class="form-grid">' +
+      '<div class="field"><label>渠道名称</label><input id="f-name" type="text" value="' + esc(ch.name) + '" placeholder="如 OpenAI 官方 / 某中转"></div>' +
+      '<div class="field"><label>Base URL</label><input id="f-base" type="text" value="' + esc(ch.base_url) + '" placeholder="https://api.openai.com/v1"></div>' +
+      '<div class="field"><label>生视频端点</label><input id="f-video" type="text" value="' + esc(ch.video_path) + '">' +
+        '<div class="tip">多数中转是 /videos/generations，部分服务用 /videos 或 /video/generations</div></div>' +
+      '<div class="field"><label>超时（秒）</label><input id="f-timeout" type="number" min="5" value="' + ch.timeout + '"></div>' +
+      '<div class="field"><label>排序（小在前）</label><input id="f-sort" type="number" value="' + (ch.sort || 0) + '"></div>' +
+      '<div class="field"><label>状态</label><label class="check"><input id="f-enabled" type="checkbox" ' + (ch.enabled === 0 ? '' : 'checked') + '>启用该渠道</label></div>' +
+      '<div class="field full"><label>备注</label><input id="f-remark" type="text" value="' + esc(ch.remark || '') + '"></div>' +
+      '<div class="field full"><label>API Key（多组自动轮换）</label>' +
+        '<div id="keys-box">' + (ch.keys.length ? ch.keys.map(keyRow).join('') : keyRow(null)) + '</div>' +
+        '<div class="mt8"><button type="button" class="btn btn-sm" onclick="addKeyRow()">+ 添加一组 Key</button></div>' +
+        '<div class="tip">Key 仅保存在本地 SQLite；编辑时留空表示不修改原 Key。</div>' +
+      '</div></div>';
+    return html;
+  }
+
+  function editChannel(id) {
+    const ch = id ? CHANNELS.find(function (c) { return c.id === id; }) : null;
+    openModal(id ? '编辑渠道' : '新增渠道', channelForm(ch), async function (mask) {
+      const payload = {
+        name: mask.querySelector('#f-name').value.trim(),
+        base_url: mask.querySelector('#f-base').value.trim(),
+        video_path: mask.querySelector('#f-video').value.trim(),
+        timeout: Number(mask.querySelector('#f-timeout').value || 180),
+        sort: Number(mask.querySelector('#f-sort').value || 0),
+        enabled: mask.querySelector('#f-enabled').checked ? 1 : 0,
+        remark: mask.querySelector('#f-remark').value.trim(),
+        keys: $$('.key-row', mask).map(function (row) {
+          return {
+            id: row.dataset.id ? Number(row.dataset.id) : 0,
+            label: row.querySelector('.k-label').value.trim(),
+            api_key: row.querySelector('.k-value').value.trim(),
+            enabled: row.querySelector('.k-enabled').checked ? 1 : 0
+          };
+        })
+      };
+      if (!payload.name) throw new Error('请填写渠道名称');
+      if (!/^https?:\/\//.test(payload.base_url)) throw new Error('Base URL 要以 http(s):// 开头');
+      await api(id ? '/db_admin/api/channels/' + id : '/db_admin/api/channels', {
+        method: id ? 'PUT' : 'POST', body: payload
+      });
+      toast('已保存', 'ok');
+      await load();
+    }, { wide: true });
+  }
+
+  async function delChannel(id) {
+    const ch = CHANNELS.find(function (c) { return c.id === id; });
+    if (!confirm('删除渠道「' + ch.name + '」？它下面的模型、Key 与调度关联都会一起删除。')) return;
+    try {
+      await api('/db_admin/api/channels/' + id, { method: 'DELETE' });
+      toast('已删除', 'ok');
+      await load();
+    } catch (e) { toast(e.message, 'error'); }
+  }
+
+  async function toggleChannel(id) {
+    const ch = CHANNELS.find(function (c) { return c.id === id; });
+    if (!ch) return;
+    const next = ch.enabled ? '停用' : '启用';
+    const tip = ch.enabled
+      ? '停用后该渠道下的所有模型都不再参与调度。'
+      : '启用后恢复参与调度。';
+    if (!confirm(next + '渠道「' + ch.name + '」？\n' + tip)) return;
+    try {
+      const r = await api('/db_admin/api/channels/' + id + '/toggle', { method: 'POST' });
+      toast('已' + (r.enabled ? '启用' : '停用') + '「' + r.name + '」', 'ok');
+      await load();
+    } catch (e) { toast(e.message, 'error'); }
+  }
+
+  async function testChannel(id) {
+    const ch = CHANNELS.find(function (c) { return c.id === id; });
+    toast('正在测试 ' + ch.name + ' …');
+    try {
+      const r = await api('/db_admin/api/channels/' + id + '/test', { method: 'POST' });
+      const html = r.data.length ? r.data.map(function (x) {
+        return '<div style="padding:8px 0;border-bottom:1px solid var(--line)">' +
+          '<b>' + esc(x.model_name) + '</b> ' +
+          '<span class="badge">' + esc(typeLabel(x.type)) + '</span> ' +
+          (x.ok ? '<span class="badge ok">通过 ' + x.elapsed_ms + 'ms</span>'
+                : '<span class="badge danger">失败</span>') +
+          '<div class="sub mt8">' + esc(x.ok ? (x.reply || '（已返回）') : (x.error || '')) + '</div>' +
+          '</div>';
+      }).join('') : '<div class="empty">该渠道还没有启用模型，先到「智能调度」添加</div>';
+      openModal('测试结果：' + ch.name, html, null, { wide: true });
+      await load();
+    } catch (e) { toast(e.message, 'error'); }
+  }
+
+  load().catch(function (e) { toast(e.message, 'error'); });
+</script>
+{% endblock %}
