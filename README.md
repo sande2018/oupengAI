@@ -1,32 +1,39 @@
-# 欧朋AI · 多模型智能调度网关
+# OupengAI · 多模型智能调度网关
 
 一个用 **Python + Flask + SQLite** 写成的 AI 网关：把多个上游 OpenAI 兼容服务（官方、中转、自建）登记为「渠道」，每个渠道可放多组 API Key、多个模型；模型上勾选能力类型，再用一个自定义模型名把它们组成调度组对外提供。客户端只认一个模型名，后台自动完成选型、故障切换、Key 轮换与知识库检索。
 
-<img width="1896" height="889" alt="image" src="https://github.com/user-attachments/assets/043bbaf7-0d7b-4a66-b122-1ff317a7098f" />
+- 本次V1.2.0 更新了众多内容：
+  - 支持一键生成插件、智能体。并且以JS插件的形式，展示在任意网站中，可以当网页的智能客服。
+  - 每个APIkey可以单独绑定智能体、插件、知识库。
+  - 可以为每个渠道单独设置到期时间，以及每个模型的额度上限。
+  - exe下载链接请查看[Releases-V1.2.0](https://github.com/sande2018/oupengAI/releases/tag/V1.2.0)
+  - <img width="264" height="122" alt="image" src="https://github.com/user-attachments/assets/1dcde3b2-20af-4fd9-82a8-39edc9285397" />
 
-<img width="1914" height="890" alt="image" src="https://github.com/user-attachments/assets/e438adea-455e-4884-b1af-00877deb86e5" />
+<img width="1920" height="945" alt="image" src="https://github.com/user-attachments/assets/a1937510-a38f-4b45-8db8-af4d053a0405" />
 
-<img width="1920" height="891" alt="image" src="https://github.com/user-attachments/assets/34828984-5f1f-40ca-acfc-689c8db3f711" />
+<img width="1920" height="945" alt="image" src="https://github.com/user-attachments/assets/33d681b1-07ff-4383-b60a-74f3a87e6862" />
 
-<img width="1879" height="887" alt="image" src="https://github.com/user-attachments/assets/d7ff30ed-5975-4ee4-a9d2-552dd663ad8b" />
+<img width="1920" height="945" alt="image" src="https://github.com/user-attachments/assets/539e7797-16d3-45cd-9c41-f3dc2150b36f" />
 
-<img width="1918" height="885" alt="image" src="https://github.com/user-attachments/assets/57bd23f4-e474-4c9c-941b-815d32d910e5" />
+<img width="1920" height="945" alt="image" src="https://github.com/user-attachments/assets/3e2677bb-c6df-44e6-b95a-a0d951506144" />
 
-<img width="1911" height="889" alt="image" src="https://github.com/user-attachments/assets/0804c227-fa08-47b9-acea-5c9857799b68" />
+<img width="1920" height="945" alt="image" src="https://github.com/user-attachments/assets/53dbae74-e18d-436a-9797-f137e7ac521f" />
 
-<img width="1920" height="887" alt="image" src="https://github.com/user-attachments/assets/47fdee94-96c9-4810-af22-9161da3672af" />
+<img width="1920" height="945" alt="image" src="https://github.com/user-attachments/assets/6fe41ec0-4e71-49b4-88e5-95596696dd03" />
 
-<img width="1920" height="885" alt="image" src="https://github.com/user-attachments/assets/9984ac18-778c-4068-876f-2894de05004e" />
+<img width="1920" height="945" alt="image" src="https://github.com/user-attachments/assets/1fa187d1-d23f-49a2-a267-4eb99b9357c4" />
 
-<img width="1884" height="888" alt="image" src="https://github.com/user-attachments/assets/3bf8a95d-ea17-4fea-865f-65a9346f8a5c" />
+<img width="1920" height="945" alt="image" src="https://github.com/user-attachments/assets/e55e3acf-abc4-4c0c-bfae-bfc4b522386e" />
 
+<img width="1920" height="945" alt="image" src="https://github.com/user-attachments/assets/aabd119d-8d0a-41d2-b9e7-56ff0ab5a7de" />
 
+<img width="1920" height="945" alt="image" src="https://github.com/user-attachments/assets/59d485f3-2c31-436d-81cc-f015da75050a" />
 
+<img width="1920" height="945" alt="image" src="https://github.com/user-attachments/assets/3a2935a8-8f68-4f9b-887f-baefddd6834b" />
 
+<img width="1920" height="945" alt="image" src="https://github.com/user-attachments/assets/29be2406-4d4f-4e15-b86e-f6ad2369583f" />
 
-
-
-
+<img width="1920" height="945" alt="image" src="https://github.com/user-attachments/assets/85bd64da-b82b-4d16-8868-dd99e0e1c5cc" />
 
 ---
 
@@ -47,24 +54,38 @@
 - **故障切换**：模型 5xx / 超时 / 连不上 → 自动换下一个渠道模型；连续失败 5 次熔断该渠道 60s。
 - **对外模型名**：`model=oupeng` 这类自定义名字，后台勾选参与调度的模型；策略支持 `priority`（按优先级故障切换）与 `weighted`（按权重轮询负载均衡）。
 - **向量知识库**：完全离线的本地哈希向量（512 维），支持切片、检索测试、重建索引；API Key 可绑定一个或多个知识库，对话时自动检索并注入 system。
+- **智能体**：每个智能体有独立的系统 Prompt，可加入多个插件、关联多个知识库，并可指定默认模型；绑定到 API Key 后，该 Key 的所有 chat 请求自动套用。
+- **插件库**：插件 = 一段可复用的提示词，可选附带一个 HTTP 工具（function calling）。可直接把多个插件关联到 API Key（不必建智能体），也可以由智能体统一管理。模型发起工具调用后由网关代为请求目标地址、把结果回填给模型，最多自动执行 3 轮。
+- **网页客服插件**：两种接入方式二选一——嵌入一行云端脚本（右下角气泡球、可收缩、支持图片与多轮），或直接使用在线链接（打开即是完整客服页面，可发给客户）。窗口参数都由网关托管并实时下发，网页源码里没有 API Key；支持上架 / 下架 / 重置地址，也可随时回到后台改配置。
 - **OpenAI 兼容**：`/v1/chat/completions`（含流式）、`/v1/images/generations`、`/v1/videos/generations`、`/v1/embeddings`、`/v1/models`。
-- **后台管理**：渠道、模型、调度组、知识库、API Key、调用日志、在线测试、系统设置，全部内置，不依赖任何 CDN。
+- **后台管理**：渠道、模型、调度组、知识库、智能体、客服插件、插件库、API Key、调用日志、在线测试、系统设置，全部内置，不依赖任何 CDN。
 
 ---
 
 ## 2. 快速开始
 
 ```powershell
-cd E:\PythonFiles\欧朋AI
 python -m pip install -r requirements.txt
 python app.py
 ```
 
-打开 <http://127.0.0.1:8000/db_admin/>，首次密码 `admin888`（登录后到「系统设置」修改）。
+打开 <http://127.0.0.1:8000/db_admin/>，初始超级管理员账号 `yb_admin`，初始密码 `123456`（登录后到「系统设置」修改）。
+
+> 只有数据库中还没有 `yb_admin` 时才会用初始密码创建账号；已有账号不会被覆盖或重置。登录页的初始账号提示只在密码仍为初始值时显示，修改密码后自动消失。
 
 启动时会自动创建 `data/oupeng.db`，并预置一个对外模型 `oupeng`（未勾选任何目标时自动使用全部启用模型，方便先跑通）。
 
 Windows 也可以双击 `start.bat`。
+
+### 多用户与共享
+
+- 登录页支持用户名 + 密码，并可自助注册（「系统设置」可关闭注册）；超级管理员也可以在「用户管理」新增用户、重置密码、停用或删除账号。
+- 每个用户的数据完全独立：渠道、对外模型、智能体、插件、知识库、API Key 与调用日志都按所有者隔离。
+- 插件库 / 知识库：所有者点「申请共享」，管理员在「共享审核」通过后其他用户才能看到（只读可用，不能修改）；未审核或已拒绝时只有本人可见；所有者可随时停止共享。
+- 智能体：审核通过后进入「应用市场」，其他用户需要手动「安装」才会在自己的智能体库里生成一份可编辑副本。安装后即为自己的数据，可以修改或删除；插件 / 知识库会“跟随回源”原作者，即使作者没有单独共享，副本也能正常使用（依赖内容仍为只读）。作者私有的模型在当前账号不可用时会改为跟随请求。安装副本不是原创，不能再次申请共享。
+- 生成客服插件时，API Key 下拉框只显示当前账号自己的 Key，不能选择或绑定其他用户的 Key。
+- 渠道：所有者可随时「共享 / 停止共享」，无需审核。共享后其他用户可在「智能调度」里勾选该渠道的模型；停止共享后立即从其他用户的调度候选中移除。共享渠道产生的调用额度记在渠道所有者名下。
+- 安装后的智能体副本按安装者自己的模型与渠道范围运行；调用日志记在调用者账号下。
 
 ---
 
@@ -87,6 +108,7 @@ Windows 也可以双击 `start.bat`。
 - 生图模型勾「生图」，生视频模型勾「生视频」。
 - 模型列表里的状态徽标也可点击快速启停（二次确认，类型与其它配置保留）。
 - 手动新增/编辑模型的弹窗里，勾选能力类型后可直接点「测试选中类型」，按当前填写的渠道与模型名真实请求一次；通过的类型变绿、失败变红，鼠标悬停可看返回内容或错误。
+- **用量与额度（最高一级）**：列表按「万」显示每个模型的 token 已用量，弹窗可单独设置到期日与剩余 token（留空 = 不限，0 = 已用完）。渠道模型额度优先于调度组：剩余量用完或到期后会**自动切换为停用状态**（该模型不再参与任何调度），补充剩余 token 或延长到期日后可重新启用。
 
 也可以直接点「从上游获取模型」：选择渠道 → 自动请求上游 `GET /models` → 勾选模型、确认（可修改）能力类型 → 批量保存。已导入的模型标记「已存在」，已停用的标记「已停用」；取消勾选一个已存在的模型并保存，会把它**停用**（类型保留），重新勾选并保存则恢复启用。渠道列表里的「拉模型」按钮会直接跳到这个弹窗。
 
@@ -108,6 +130,7 @@ Windows 也可以双击 `start.bat`。
 - 勾选参与调度的渠道模型，可设置每个目标的优先级/权重。
 - `priority`：按优先级从小到大依次尝试，前一个失败自动切下一个。
 - `weighted`：同优先级内按权重平滑轮询，适合多家渠道做负载均衡。
+- **用量与额度**：列表里按「万」显示整组和每个模型的 token 已用量；编辑弹窗可以给整组和每个模型单独设置到期日与剩余 token（留空 = 不限，0 = 已用完）。任一层到期或用完后自动停止调度：模型级停止只影响它自己，组级停止则整个调度组不再服务。用量按上游返回的 `usage` 统计，流式响应上游没给 `usage` 时按文本长度估算。
 
 ### ④ 知识库（可选，`/db_admin/knowledge`）
 
@@ -115,14 +138,64 @@ Windows 也可以双击 `start.bat`。
 - 「检索测试」里输入一句话，可看到命中片段与相似度。
 - 文档列表支持「编辑」：修改标题或正文后保存，会按知识库当前的切片参数重建该文档的索引。
 - 编辑弹窗里可以选择一个模型做「AI 润色」：按主题分段、每段自包含、去口语与重复，保留事实与数字；结果只填回编辑框，确认后保存才生效。单次最多 **60000 字**；超过 6000 字会自动按句子分批调用（每批约 6000 字、最多 12 批），再拼接返回，因此不会受模型上下文限制。
+- 同一弹窗还能填写「修改需求」（如「把退款条款改写得更口语化，并补充退款时效」），点「按需求修改」让模型按需求改写正文；需求最多 2000 字，结果同样只填回编辑框。
 - 调整切片大小/重叠后会自动重建索引；也可手动点「重建索引」。
 
 ### ⑤ 站内 API Key（`/db_admin/apikeys`）
 
 - 生成 `sk-ou-...`，可设置每分钟限速，可勾选关联的知识库（可多选）。
+- **关联插件库（可多选）**：即使不绑定智能体，模型也能直接调用这些插件里的 HTTP 工具——网关把插件提示词拼进 system，注入 `tools`，并代执行 `tool_calls`（最多 3 轮）。绑定了智能体时，两边的插件会自动合并去重（智能体的在前）。客户端自己在请求体里传 `tools` 时网关不接管，保持原样透传。停用的插件不注入。
+- 可直接把 Key 绑定到一个智能体（默认 Prompt / 插件 / 知识库自动生效）。
+- **可用模型与额度**：可勾选这个 Key 能用的**对外模型**与**渠道模型**（两类都不勾 = 全部模型可用，默认如此）；还能设置「剩余 Tokens（万）」和「到期日」，留空 = 不限。额度用完或到期后，这个 Key 的所有请求都会被直接拒绝（403），`/v1/models` 也只返回被授权的模型。
 - 页面顶部直接显示 Base URL 并支持一键复制（反向代理场景请确认代理转发的 Host 正确）。
 - 用这个 Key 调用 `/v1/*` 时，如果关联了知识库，chat 请求会自动做 RAG 注入。
 - 支持「重置」生成新 Key（旧的立即失效）。
+
+### ⑥ 智能体与插件（可选，`/db_admin/agents`、`/db_admin/plugins`）
+
+顺序：先在「插件库」建插件 → 在「智能体」里加入插件/知识库、写系统 Prompt → 在「API Key」里绑定智能体，或直接把插件关联到 API Key（不建智能体也能用工具）。
+
+**AI 自动填写**：智能体与插件的编辑弹窗顶部都有一段「需求描述」输入框。粘贴一段多行文字（例如「做一个电商客服助手，回答简洁礼貌，遇到订单问题先让用户提供订单号」），选择模型或留空自动选择，点「AI 填写」即可生成名称、说明、系统 Prompt、采样参数或工具定义。AI 只填写表单，不会自动保存，也不会改动已勾选的插件/知识库；不确定的接口地址会留空，需要你补充。
+
+**插件**由两部分组成，都可留空：
+
+- **提示词**：拼进智能体 system 的提示片段（例如「回答前先确认城市」）。
+- **HTTP 工具**：工具名、给模型看的说明、参数 JSON Schema、请求方法（GET/POST）、执行地址、请求头、超时。
+  模型返回 `tool_calls` 后，网关以 JSON 请求目标地址，把响应正文作为 `role=tool` 消息回填，再请求模型，最多 3 轮。
+  客户端自己传 `tools` 时网关不接管，保持原样透传。
+
+**智能体**可配置：
+
+- **系统 Prompt**：放在所有消息最前，优先级高于客户端自带的 system。
+- **默认模型**：留空则沿用请求里的 `model`；填写后该智能体所有请求统一走这个模型。
+- **Temperature / Max Tokens**：`-1` / `0` 表示不覆盖，客户端显式传了值时以客户端为准。
+- **插件与知识库**：可多选；知识库检索结果会追加在 Prompt 之后。
+
+**注入顺序**：智能体 Prompt → 插件提示词 → 知识库资料。
+
+**知识库优先级**：请求头 `X-Knowledge-Ids` / 请求体 `knowledge.kb_ids` > 智能体关联 > API Key 关联。
+
+**流式**：智能体启用了 HTTP 工具时，网关会先同步执行完工具、拿到最终答案，再把结果合成 SSE 回放，保证 `stream: true` 的客户端能正常解析。
+
+**测试（模拟客服）**：点智能体列表里的「测试」直接打开客服对话框，用后台登录态调用，自动带上该智能体的系统 Prompt、插件与知识库，支持图片 / 文本文件上传和多轮上下文，回复下方显示命中的渠道、模型、耗时与知识库命中数，不占用 API Key 的调用额度。在线测试页也能选择智能体，用同一套逻辑试跑。
+
+**网页客服插件**：在智能体列表点「测试 → 生成插件」（或直接在「客服插件」页点「编辑」），配置标题、副标题、欢迎语、提问案例（每行一个）、主题色、弹出位置、使用模型，并选择一个已存在的 API Key。这个 Key **只在服务端**用于扣额度与模型授权。保存后得到两种接入方式：
+
+```html
+<!-- 方式一：嵌入客户网页的右下角气泡球 -->
+<script src="https://你的网关地址/embed/xxxxxxxx.js" async defer></script>
+
+<!-- 方式二：在线链接，浏览器打开即是完整客服页面 -->
+https://你的网关地址/embed/xxxxxxxx
+```
+
+两种方式共用同一个地址标识与同一份配置，改完配置保存即生效，客户页面和已发出的链接都不需要更换。
+
+脚本本体、窗口参数与鉴权全部托管在网关：客户页面加载后，云端脚本再拉取标题 / 欢迎语 / 案例 / 主题色等配置并渲染（右下角客服窗口，可收缩成气泡球，支持图片与多轮对话，窄屏自动全屏）。网页源码里没有 API Key，也没有任何插件配置，改配置不需要改客户页面。
+
+**对话走云端代理**（`/embed/api/<id>/chat`）：浏览器只带插件地址，网关按地址找到智能体与关联 Key，固定模型与知识库（工具 = 智能体插件 + 该 Key 关联的插件），调用上游并按关联 Key 扣额度、写日志。插件地址被复制也只能聊这一个客服窗口；生图 / 视频 / 其它模型都调不到。
+
+**客服插件管理**（`/db_admin/widgets`）：列出所有已生成的插件，可重新编辑配置、复制嵌入代码或在线链接、上架 / 下架、重置地址、删除。下架后已嵌入的窗口不再渲染、在线链接提示已下架、对话接口返回 403；重置地址会让所有旧 `<script src>` 与旧在线链接立即失效，需要重新复制。
 
 ---
 
@@ -224,9 +297,11 @@ print(img.data[0].url)
 
 - `"knowledge": false`：本次关闭知识库。
 - 请求头 `X-Knowledge: off`：同上。
-- 请求头 `X-Knowledge-Ids: 1,2`：临时指定知识库（覆盖 API Key 绑定）。
+- 请求头 `X-Knowledge-Ids: 1,2`：临时指定知识库（覆盖智能体与 API Key 的绑定）。
 - 请求头 `X-Task-Type: ocr`：强制走 OCR 类模型。
 - `"task_type": "vision"`：请求体里强制类型。
+
+API Key 绑定了智能体时，以上参数都不需要额外传——Prompt、插件与知识库会按智能体配置自动生效。API Key 直接关联了插件时，插件提示词与工具同样自动生效（与智能体插件合并去重）。
 
 ### 5.4 响应头
 
@@ -236,9 +311,11 @@ print(img.data[0].url)
 | `X-Ou-Channel` | 实际命中的渠道名（URL 编码） |
 | `X-Ou-Type` | 本次调度的能力类型 |
 | `X-Ou-Rag-Hits` | 知识库命中条数 |
-| `X-Ou-Latency-Ms` | 总耗时（含故障切换） |
+| `X-Ou-Agent` | 本次生效的智能体名（URL 编码，未绑定时不返回） |
+| `X-Ou-Tool-Rounds` | 网关代执行的插件工具轮数（仅 chat/completions） |
+| `X-Ou-Latency-Ms` | 总耗时（含故障切换与工具调用） |
 
-响应体的 `model` 字段会被回填为客户端请求的模型名（流式响应除外，流式按上游原样透传）。
+响应体的 `model` 字段会被回填为客户端请求的模型名；智能体指定了默认模型时回填为该智能体模型（流式响应除外，流式按上游原样透传）。
 
 ### 5.5 其它端点
 
@@ -290,7 +367,7 @@ RAG 注入规则：
 ## 7. 目录结构
 
 ```
-欧朋AI/
+OupengAI/
 ├── app.py                     # Flask 应用入口、CORS、模板过滤器
 ├── config.py                  # 配置与六类能力定义
 ├── db.py                      # SQLite 建表、连接管理、查询 helper
@@ -298,12 +375,14 @@ RAG 注入规则：
 ├── start.bat
 ├── services/
 │   ├── router.py              # 调度核心：候选展开、Key 轮换、熔断、上游请求
-│   └── knowledge.py           # 切片、哈希向量、检索、RAG 注入
+│   ├── knowledge.py           # 切片、哈希向量、检索、RAG 注入
+│   ├── agents.py              # 智能体 Prompt 组装、工具定义、HTTP 工具执行
+│   └── widgets.py             # 网页客服插件：配置、公开 token、自包含 JS 生成
 ├── routes/
-│   ├── openai_api.py          # /v1/* OpenAI 兼容端点
+│   ├── openai_api.py          # /v1/* OpenAI 兼容端点（含智能体、工具循环、插件 token）
 │   ├── admin_api.py           # /db_admin/api/* 管理接口
 │   └── admin_pages.py         # /db_admin/* 页面路由
-├── templates/                 # 登录、概览、渠道、调度、知识库、Key、日志、测试、设置
+├── templates/                 # 登录、概览、渠道、调度、知识库、智能体、客服插件、插件、Key、日志、测试、设置
 ├── static/
 │   ├── css/app.css
 │   └── js/app.js              # fetch 封装、Toast、弹窗、复制、类型徽标
@@ -317,7 +396,8 @@ RAG 注入规则：
 数据库表：
 
 `channels`、`channel_keys`、`channel_models`、`custom_models`、`custom_model_targets`、
-`knowledge_bases`、`kb_documents`、`kb_chunks`、`api_keys`、`api_key_kbs`、`call_logs`、`settings`。
+`knowledge_bases`、`kb_documents`、`kb_chunks`、`plugins`、`agents`、`agent_plugins`、
+`agent_kbs`、`api_keys`（含 `agent_id` 绑定）、`api_key_kbs`、`api_key_plugins`、`call_logs`、`settings`。
 
 ---
 
@@ -331,7 +411,7 @@ RAG 注入规则：
 | `OUPENG_DATA_DIR` | `./data` | 数据目录 |
 | `OUPENG_DB_PATH` | `./data/oupeng.db` | SQLite 路径 |
 | `OUPENG_SECRET_KEY` | 开发默认值 | **生产必须改** |
-| `OUPENG_ADMIN_PASSWORD` | `admin888` | 首次启动创建的管理员密码 |
+| `OUPENG_ADMIN_PASSWORD` | `123456` | 首次启动创建超级管理员 `yb_admin` 时使用的初始密码（已有账号不受影响） |
 | `OUPENG_CONNECT_TIMEOUT` | `10` | 连接上游超时（秒） |
 | `OUPENG_UPSTREAM_TIMEOUT` | `180` | 单次请求超时（渠道可覆盖） |
 | `OUPENG_RETRY_PER_CANDIDATE` | `0` | 单个候选内部重试次数 |
@@ -345,7 +425,7 @@ RAG 注入规则：
 python -m unittest discover -s tests -t . -v
 ```
 
-35 项测试，覆盖：
+70 项测试，覆盖：
 
 - 鉴权（缺 Key / 错 Key / 停用）
 - 文本、图片理解、OCR（提示词与请求头两种判定）、生图、生视频的路由
@@ -354,10 +434,24 @@ python -m unittest discover -s tests -t . -v
 - 视觉 → OCR 兜底链
 - 流式 SSE 透传
 - 知识库入库、检索、按 API Key 绑定注入、`X-Knowledge: off`、`knowledge.kb_ids` 指定库
+- API Key 关联插件：tools 注入、网关代执行工具并回填、停用插件不注入、增删改与级联清理
 - 优先级的排序、加权轮询负载均衡
 - 后台全部页面渲染与完整 CRUD 流程（含 Key 脱敏、密码修改）
 
 测试用进程内假上游（`tests/mock_upstream.py`）替代真实 HTTP，因此在无外网/无 localhost 连接的环境也能跑。
+
+---
+
+## 打包为 Windows exe
+
+```powershell
+python -m pip install pyinstaller
+.\build_exe.ps1
+```
+
+产物：`dist\OupengAI.exe`（单文件，约 32MB）。首次运行会在 exe 同目录创建 `data\oupeng.db`，升级 exe 不会丢数据；端口可用 `OUPENG_PORT` 环境变量修改。`templates` 与 `static` 已通过 `--add-data` 内嵌，脚本里排除了 numpy / PIL 等无关依赖以减小体积。
+
+发布时把 `OupengAI.exe` 和 `README-FIRST.txt` 一起压缩即可；单文件 exe 首次启动需要解压，约 3~10 秒，部分杀毒软件可能误报，加入白名单即可。
 
 ---
 
@@ -404,3 +498,13 @@ python -m unittest discover -s tests -t . -v
 
 **Q：能不能再加「图片编辑 / 图生图」？**
 可以。在 `config.AI_TYPES` 增加 `image_edit`，在 `router` 里加对应类型，再加一个 `/v1/images/edits` 转发端点即可；现有调度、Key 轮换、熔断都会自动复用。
+
+---
+
+## 12. 开源与反馈
+
+- 源码仓库：<https://github.com/sande2018/oupengAI>
+- 问题反馈：<https://github.com/sande2018/oupengAI/issues>
+- 后台每个页面底部都标注了开源地址；右下角「打赏作者奶茶」鼠标悬停会显示微信赞赏码（`static/8b2df04380d487f6778af3c40593134c.jpg`）。
+
+如果这个项目对你有帮助，欢迎点个 Star。
