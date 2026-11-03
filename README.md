@@ -6,7 +6,7 @@
   - 支持一键生成插件、智能体。并且以JS插件的形式，展示在任意网站中，可以当网页的智能客服。
   - 每个APIkey可以单独绑定智能体、插件、知识库。
   - 可以为每个渠道单独设置到期时间，以及每个模型的额度上限。
-  - Windwos最新版版本请查看[Releases-V1.2.0](https://github.com/sande2018/oupengAI/releases/tag/V1.2.0)
+  - Windows最新版请查看[Releases-V1.2.0](https://github.com/sande2018/oupengAI/releases/tag/V1.2.0)
   <img width="264" height="122" alt="image" src="https://github.com/user-attachments/assets/1dcde3b2-20af-4fd9-82a8-39edc9285397" />
 
 <img width="1920" height="945" alt="image" src="https://github.com/user-attachments/assets/a1937510-a38f-4b45-8db8-af4d053a0405" />
